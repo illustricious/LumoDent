@@ -11,6 +11,7 @@ pub mod patients;
 pub mod pdf;
 pub mod processing;
 pub mod reports;
+pub mod sensor;
 pub mod sha256;
 pub mod studies;
 pub mod users;
