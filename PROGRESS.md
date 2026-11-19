@@ -98,7 +98,7 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 | Kelas | Peran | Sudah di Rust | Total |
 |---|---|---:|---:|
 | DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
-| ImageProcessing | Olah citra | 17 (semua; `src/processing.rs` menambah Set, MultiplyConstant, GetAverageValue, GetMinMax×2, ImageNormalizeEx, AutoBrightnessAndContrast, MedianSmooth, Smoothness, Sharpness, MultScaleWLN, MatTransfor; rumus milik rewrite) | 17 |
+| ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 8 algoritma dipetakan dari disassembly, lihat bagian ImageProcessing) | 17 |
 | DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
@@ -130,3 +130,20 @@ Uji UI `src/ui/tests.rs` memakai `egui_kittest`: tombol, daftar dan kolom teks d
 - Tulis: Explicit VR LE 8-bit. Gambar abu-abu menjadi Digital Intra-Oral X-Ray (For Presentation, modality IO), gambar berwarna menjadi Secondary Capture. Atribut pasien dan studi diambil dari database; UID memakai root `2.25`.
 - Import `.dcm` mengisi SOP Instance UID, modality, accession number, body part, deskripsi dan waktu studi dari berkas. Bila Patient ID di berkas berbeda, gambar tetap diimpor dan muncul peringatan.
 - Belum diuji dengan berkas DICOM dari sensor atau PACS sungguhan; tes memakai berkas buatan sendiri.
+
+## ImageProcessing: pemetaan dari CoreLibrary.dll
+
+Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan call site di `NanoPix.exe` dengan `llvm-objdump`; Ghidra tidak tersedia sehingga REA tidak punya decompiler. Referensi bekerja pada piksel abu 16 bit (format 4); LumoDent memakai 8 bit sehingga konstanta rentang diskalakan ke 0..255. Hasil di-clamp lalu dipotong (truncate), seperti referensi.
+
+| Fungsi | Alamat | Algoritma asli | Parameter yang dipakai NanoPix.exe |
+|---|---|---|---|
+| Smoothness | 0x100c3410 → 0x100c1be0 | Kernel Gaussian (2r+1)² `exp(-(dx²+dy²)/2σ²)` dinormalisasi; konvolusi dengan padding reflect-101 (separable bila rank 1) | Viewer 0x521f76: r=2, σ=4 |
+| Sharpness | 0x100c3300 → 0x100c1760 | Kernel Gaussian tak dinormalisasi (jumlah S); `v·(1+aS) − a·(K∗v)`; mask opsional dari `|v−blur| ≥ threshold` | Viewer 0x521f31: r=1, a=0.6·level (+2 untuk nilai sensor 1200/1600), σ=1, tanpa mask; lalu MedianSmooth(1) |
+| MedianSmooth | 0x100c21f0 → 0x100bb560 | Median jendela (2r+1)², padding reflect-101 | Viewer r=1; akuisisi r=1/2 |
+| MultScaleWLN | 0x100c2460 → 0x100b9af0 | LUT rata-rata n jendela linear: jendela k memetakan `[min+k(A−min)/n, max+k(B−max)/n]` ke `[C,D]` | Akuisisi 0x4f3f41: n=10, A=10000 (atau 14660), B=65535, C=0, D=65535 |
+| BrightnessAndContrast | 0x100bf0a0 | Jendela pusat `32767.5 − 163.84·b`, lebar `65536/e^(c/100)`, ditarik linear ke 0..65535 | Slider ±100 |
+| AutoBrightnessAndContrast | 0x100be720 | Histogram di jendela B/C, pangkas sisi yang bagian luarnya lebih sedikit sampai (1−ratio) piksel terbuang, lalu kembali ke slider: `c = ln(65536/(hi−lo))·100 + 0.5`; slider di batas → reset 0 | 0x575152: ratio 0.97, batas 100/100 |
+| Invert | 0x100c1ed0 | `v = min(param, TYPE_MAX) − v` | Viewer memberi nilai max citra |
+| GetMinMaxIntegerValue | 0x100c0b70 | Min/maks piksel | — |
+
+Belum dipetakan (rumus rewrite sendiri): ImageNormalizeEx, MatTransfor, Set, MultiplyConstant, GetAverageValue, GetMinMaxFloatValue. Fungsi tambahan yang ada di DLL tapi tidak diimpor NanoPix.exe: AddConstant, Copy, DrawImageHists, GammaCorrect, WindowWidthLevel.

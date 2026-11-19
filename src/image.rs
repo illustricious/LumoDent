@@ -188,12 +188,27 @@ impl Image {
     }
 }
 
-/// Brightness and contrast range from -100 to 100. Contrast scales around mid-grey,
-/// from flat at -100 to four times the slope at 100.
+/// BrightnessAndContrast of the reference CoreLibrary.dll, scaled to 8 bits.
+/// Sliders run −100..100; the input window from [`crate::processing::tone_window`]
+/// is stretched linearly to 0..255, with values at or below it black and at or
+/// above it white. A window narrower than one level leaves the image unchanged.
 pub fn levels(brightness: i32, contrast: i32) -> [u8; 256] {
-    let (b, c) = (brightness.clamp(-100, 100) as f32, contrast.clamp(-100, 100) as f32);
-    let slope = if c >= 0.0 { 1.0 + c * 0.03 } else { 1.0 + c / 100.0 };
-    std::array::from_fn(|v| ((v as f32 - 127.5) * slope + 127.5 + b * 2.55).round().clamp(0.0, 255.0) as u8)
+    let (lo, hi) = crate::processing::tone_window(brightness.clamp(-100, 100), contrast.clamp(-100, 100));
+    if lo >= hi - 1.0 {
+        return std::array::from_fn(|v| v as u8);
+    }
+    let slope = 255.0 / (hi - lo);
+    let offset = -slope * lo;
+    std::array::from_fn(|v| {
+        let v = v as f32;
+        if lo >= v {
+            0
+        } else if v < hi {
+            (v * slope + offset + 0.5).clamp(0.0, 255.0) as u8
+        } else {
+            255
+        }
+    })
 }
 
 /// Zoom and pan relative to fitting the whole image inside the canvas.
@@ -314,14 +329,16 @@ mod tests {
     fn tone_curve_endpoints() {
         let neutral = levels(0, 0);
         assert!(neutral.iter().enumerate().all(|(i, &v)| v as usize == i));
-        assert_eq!(levels(100, 0)[0], 255);
-        assert_eq!(levels(-100, 0)[255], 0);
+        // Brightness ±100 shifts the window by a quarter of the range (0.64 × 100).
+        assert_eq!((levels(100, 0)[0], levels(100, 0)[200]), (64, 255));
+        assert_eq!((levels(-100, 0)[255], levels(-100, 0)[50]), (191, 0));
+        // Contrast −100 widens the window e times; +100 narrows it e times.
         let flat = levels(0, -100);
-        assert!(flat.iter().all(|&v| v == 128));
+        assert_eq!((flat[0], flat[255]), (81, 174));
         let steep = levels(0, 100);
-        assert_eq!((steep[64], steep[192]), (0, 255));
+        assert_eq!((steep[80], steep[127], steep[128], steep[175]), (0, 126, 129, 255));
         let image = Image { width: 1, height: 1, pixels: vec![0x102030] };
-        assert_eq!(image.adjusted(&levels(100, 0)), [0xffffff]);
+        assert_eq!(image.adjusted(&levels(100, 0)), [0x506070]);
     }
 
     #[test]

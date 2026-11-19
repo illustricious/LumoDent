@@ -81,6 +81,14 @@ impl ViewerState {
         }
     }
 
+    /// AutoBrightnessAndContrast: moves the sliders (ratio 0.97, limits ±100).
+    pub fn auto_level(&mut self) {
+        if let Some(image) = &self.image {
+            (self.brightness, self.contrast) = processing::auto_brightness_contrast(image, self.brightness, self.contrast, 100, 0.97);
+            self.refresh();
+        }
+    }
+
     /// The image as displayed, with tone changes applied, for Send to Report.
     pub fn snapshot(&self) -> Option<Image> {
         let image = self.image.as_ref()?;
@@ -183,7 +191,7 @@ impl App {
         if pressed(Key::L) { self.viewer.edit(Image::rotate_counter_clockwise); }
         if pressed(Key::H) { self.viewer.edit(Image::flip_horizontal); }
         if pressed(Key::V) { self.viewer.edit(Image::flip_vertical); }
-        if pressed(Key::I) { self.viewer.edit(Image::invert); }
+        if pressed(Key::I) { self.viewer.edit(processing::invert); }
         if pressed(Key::F) || pressed(Key::Num0) { self.viewer.viewport = Viewport::default(); }
         let step = if pressed(Key::ArrowDown) { 1 } else if pressed(Key::ArrowUp) { -1 } else { 0 };
         if step != 0 && !self.viewer.studies.is_empty() {
@@ -280,7 +288,7 @@ impl App {
                         (Icon::Rotate, t("Rotate Right"), Image::rotate_clockwise),
                         (Icon::FlipH, t("Flip Horizontal"), Image::flip_horizontal),
                         (Icon::FlipV, t("Flip Vertical"), Image::flip_vertical),
-                        (Icon::Invert, t("Invert"), Image::invert),
+                        (Icon::Invert, t("Invert"), processing::invert),
                     ];
                     for (icon, label, f) in tools {
                         if icons::button(ui, Some(icon), label, size, IconLayout::Stacked, has_image, false).clicked() {
@@ -290,13 +298,18 @@ impl App {
                     let filters = icons::button(ui, Some(Icon::Filter), t("Filters"), size, IconLayout::Stacked, has_image, false);
                     egui::Popup::menu(&filters).show(|ui| {
                         ui.set_min_width(170.0);
-                        let items: [(&str, fn(&mut Image)); 6] = [
-                            ("Auto Level", |i| {
-                                processing::auto_levels(i, 0.5);
+                        // Auto sets the Brightness/Contrast sliders, like the reference.
+                        if ui.button(t("Auto Level")).clicked() {
+                            self.viewer.auto_level();
+                        }
+                        // Parameters are the ones NanoPix.exe passes to CoreLibrary.dll.
+                        let items: [(&str, fn(&mut Image)); 5] = [
+                            ("Enhance Detail", processing::enhance),
+                            ("Sharpen", |i| {
+                                processing::sharpen(i, 1, 0.6, 1.0);
+                                processing::median(i, 1);
                             }),
-                            ("Enhance Detail", |i| processing::enhance(i, 3, 1.0)),
-                            ("Sharpen", |i| processing::sharpen(i, 1.5, 1.0)),
-                            ("Smooth", |i| processing::smooth(i, 1.2)),
+                            ("Smooth", |i| processing::smooth(i, 2, 4.0)),
                             ("Reduce Noise", |i| processing::median(i, 1)),
                             ("Normalize", processing::normalize),
                         ];
