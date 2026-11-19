@@ -686,6 +686,31 @@ mod tests {
         assert!(diff.abs() <= 110.0, "odd {} vs even {}", img[18], img[0]);
     }
 
+    /// Runs against a real calibration folder when LUMODENT_CAL_DIR and
+    /// LUMODENT_CAL_SN point at one (never committed: it is device data).
+    #[test]
+    fn real_calibration_folder() {
+        let (Ok(dir), Ok(sn)) = (std::env::var("LUMODENT_CAL_DIR"), std::env::var("LUMODENT_CAL_SN")) else { return };
+        let dir = Path::new(&dir);
+        let (w, h) = (1200, 1600);
+        let read = |n: &str| parse_image_file(&std::fs::read(calibration_path(dir, &sn, n)).unwrap(), w, h).expect(n);
+        let cal = HdrCalibration { offset0: read("Offset Image0"), offset1: read("Offset Image1"), gain0: read("Gain Image0"), gain1: read("Gain Image1") };
+        let depth = detect_bit_depth(&cal.offset0, w);
+        let (map, syntax) = parse_pixel_map(&std::fs::read(calibration_path(dir, &sn, "Pixel Map")).unwrap()).unwrap();
+        eprintln!("depth {depth}, {} defects, syntax error {syntax}", map.len());
+        assert!(!syntax && map.len() > 1000);
+        // A flat exposure: gain images are flat fields, so merging gain0 itself
+        // (channel 0 everywhere) should come out close to uniform.
+        let mut img: Vec<u16> = cal.gain0.iter().map(|v| v & !1).collect();
+        assert!(hdr_merge(&mut img, w, h, &cal));
+        pixel_correction(&mut img, w, h, &map, 2);
+        let inner: Vec<f64> = (100..h - 100).flat_map(|y| (100..w - 100).map(move |x| (x, y))).map(|(x, y)| img[y * w + x] as f64).collect();
+        let mean = inner.iter().sum::<f64>() / inner.len() as f64;
+        let sd = (inner.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / inner.len() as f64).sqrt();
+        eprintln!("flat field after correction: mean {mean:.1}, sd {sd:.1} ({:.2}%)", 100.0 * sd / mean);
+        assert!(sd / mean < 0.05);
+    }
+
     #[test]
     fn correct_image_reads_the_three_files() {
         let (w, h) = (6, 4);

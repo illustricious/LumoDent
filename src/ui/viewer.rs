@@ -441,20 +441,22 @@ impl App {
         if let Some(t) = &self.viewer.texture {
             painter.image(t.id(), dest, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
-        let spacing = self.viewer.spacing;
+        // Millimetres per pixel: the image's own spacing, else the calibration setting.
+        let mm_per_px = self.settings.mm_per_pixel(self.viewer.spacing);
+        let style = self.settings.length;
+        let show_unit = self.settings.length_unit;
         let to_screen = |q: egui::Pos2| dest.min + q.to_vec2() * dest.width() / iw as f32;
         for line in self.viewer.measures.iter().chain(self.viewer.drawing.iter()) {
             let (a, b) = (to_screen(line[0]), to_screen(line[1]));
-            let ruler = Color32::from_rgb(0xff, 0xd2, 0x3f);
-            painter.line_segment([a, b], egui::Stroke::new(3.0, Color32::from_black_alpha(160)));
-            painter.line_segment([a, b], egui::Stroke::new(1.5, ruler));
-            painter.circle_filled(a, 3.0, ruler);
-            painter.circle_filled(b, 3.0, ruler);
-            let pixels = line[0].distance(line[1]) as f64;
-            let text = match spacing {
-                Some(mm) => format!("{:.1} mm", pixels * mm),
-                None => format!("{pixels:.0} px"),
-            };
+            let [r, g, bl, al] = style.color;
+            let ruler = Color32::from_rgba_unmultiplied(r, g, bl, al);
+            let width = style.thickness as f32;
+            painter.line_segment([a, b], egui::Stroke::new(width + 1.5, Color32::from_black_alpha(160)));
+            painter.line_segment([a, b], egui::Stroke::new(width, ruler));
+            painter.circle_filled(a, width + 1.5, ruler);
+            painter.circle_filled(b, width + 1.5, ruler);
+            let mm = line[0].distance(line[1]) as f64 * mm_per_px;
+            let text = if show_unit { format!("{mm:.1} mm") } else { format!("{mm:.1}") };
             let at = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0) + vec2(8.0, -8.0);
             let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), ruler);
             let bg = egui::Rect::from_min_size(at - vec2(0.0, galley.size().y), galley.size()).expand(3.0);

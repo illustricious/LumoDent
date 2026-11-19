@@ -229,3 +229,19 @@ Mode HDR: bit terendah piksel mentah menandai kanalnya (ganjil = kanal 1, 9.19×
 Satu perbedaan yang disengaja: aslinya memberi ScPixelCorrection jumlah entri = (w×h) & 0x7fff, bukan jumlah entri sebenarnya, sehingga sisa isi buffer gain bisa terbaca sebagai entri palsu. LumoDent hanya memakai entri yang ada di file.
 
 Belum diketahui: flag HDR mana yang dipakai NanoPix.exe untuk NanoPix-E, dan apakah frame dari sensor_io.dll memang big-endian (aslinya menukar byte sebelum dan sesudah koreksi).
+
+Diuji dengan data asli: folder `calibration13` di instalasi NanoPix berisi kalibrasi HDR sensor 12090806 (Offset/Gain Image0/1 berukuran 1200 × 1600, Pixel Map 7.228 entri). Tes `real_calibration_folder` (aktif bila `LUMODENT_CAL_DIR` dan `LUMODENT_CAL_SN` diisi) membaca semuanya: kedalaman terdeteksi 14 bit, dan flat field setelah HDR merge dan perbaikan piksel rata dengan simpangan 3,3%. Data kalibrasi tidak di-commit.
+
+## Pengaturan (NanoPix.exe 0x583830)
+
+Dialog Settings asli punya lima tab; semua field dan daftar pilihannya dipetakan ke `src/settings.rs` (disimpan di `settings.txt`) dan `src/ui/settings.rs` (menu Alat → Pengaturan…). Daftar pilihan diambil dari tabel string di bagian data executable.
+
+| Tab | Fungsi asli | Isi | Dipakai di LumoDent |
+|---|---|---|---|
+| Umum | 0x58aed0 | bahasa, ukuran ikon (kecil/sedang/besar), nama/alamat/telepon klinik (128/320/16 karakter) | bahasa dan tema, zoom antarmuka 0,9/1,0/1,15, data klinik untuk laporan |
+| Pasien | 0x58b8f0 | nomor rekam medis otomatis, urutan nama, hari untuk Baru Diambil/Baru Dicetak | nomor otomatis mengisi ID pasien baru dengan stempel waktu; lainnya disimpan |
+| Akuisisi | 0x589a50 | generator DC/AC, kV 60–80, mA (DC: ≤0,2 … >3,0; AC: <4,0 / 4,0~7,0 / >7,0), kalibrasi mm/piksel 0,005–1,0, lokasi data | kalibrasi dipakai penggaris bila gambar tidak menyimpan pixel spacing; generator disimpan untuk akuisisi |
+| Penampil | 0x58d2d0 | layar penuh, layout 1x1/1x2/2x1/2x2, kaca pembesar 100–200 px ×1,5–2,5, warna bingkai tangkapan, grid 1/2/5/10 mm (warna, tebal 1–5 px, opasitas 10–50%), warna dan tebal panjang/sudut/gambar/garis/persegi/elips, tampil satuan, gaya memo dan 7 teks cepat | layar penuh saat start, warna/tebal/satuan penggaris; lainnya disimpan untuk fitur yang belum ada |
+| Laporan | 0x58c3c0 | warna dan tebal bingkai, ukuran huruf 9–18 pt, warna teks (aslinya juga ukuran kertas, orientasi, header, footer) | disimpan; ukuran kertas, orientasi, header dan footer tetap diatur per laporan |
+
+Saat jenis generator diganti, aslinya mengatur ulang kV dan mA (DC → mA indeks 3, AC → indeks 1); `Settings::set_generator_ac` meniru itu. Algoritma nomor rekam medis otomatis aslinya belum dipetakan.

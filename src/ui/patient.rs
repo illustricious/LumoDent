@@ -98,7 +98,12 @@ impl App {
             let Some(p) = self.patients.selected_patient() else { return };
             Editor { pk: Some(p.pk), fields: values(p) }
         } else {
-            Editor { pk: None, fields: Default::default() }
+            let mut fields: [String; 11] = Default::default();
+            if self.settings.auto_chart_number {
+                // A unique chart number from the clock, YYYYMMDDHHMMSS.
+                fields[0] = lumodent::dates::local_timestamp().chars().filter(char::is_ascii_digit).collect();
+            }
+            Editor { pk: None, fields }
         };
         self.patients.editor = Some(editor);
     }

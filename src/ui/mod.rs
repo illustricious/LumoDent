@@ -6,6 +6,7 @@ pub mod i18n;
 pub mod icons;
 mod patient;
 mod report;
+mod settings;
 pub mod theme;
 mod viewer;
 #[cfg(test)]
@@ -118,6 +119,9 @@ pub struct App {
     pub notice: Option<String>,
     pub confirm: Option<Confirm>,
     pub about: bool,
+    pub settings: lumodent::settings::Settings,
+    pub(crate) settings_dialog: Option<settings::Dialog>,
+    started: bool,
     pub hooks: Hooks,
     left_width: f32,
 }
@@ -125,6 +129,7 @@ pub struct App {
 impl App {
     pub fn new(ws: Workspace, hooks: Hooks) -> Self {
         let clinic = ws.load_clinic();
+        let settings = lumodent::settings::Settings::load(&ws.data.join("settings.txt"));
         let mut app = Self {
             ws,
             screen: Screen::Patient,
@@ -134,6 +139,9 @@ impl App {
             notice: None,
             confirm: None,
             about: false,
+            settings,
+            settings_dialog: None,
+            started: false,
             hooks,
             left_width: 180.0,
         };
@@ -230,6 +238,13 @@ impl App {
 
     /// Draws the whole window into `ui`.
     pub fn show(&mut self, ui: &mut Ui) {
+        if !self.started {
+            self.started = true;
+            ui.ctx().set_zoom_factor(self.settings.icon_size.zoom());
+            if self.settings.fullscreen {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+            }
+        }
         self.left_width = (ui.max_rect().width() * 0.17).clamp(200.0, 260.0);
         ui.painter().rect_filled(ui.max_rect(), 0.0, theme::back());
         egui::Panel::top("menu")
@@ -345,6 +360,9 @@ impl App {
                     }
                 }
             });
+            if ui.button(t("Settings…")).clicked() {
+                self.open_settings();
+            }
             ui.separator();
             if ui.button(t("Open Data Folder")).clicked() {
                 let dir = self.ws.data.clone();
@@ -444,6 +462,7 @@ impl App {
                 self.confirm = None;
             }
         }
+        self.settings_window(ctx);
         if self.about {
             let modal = egui::Modal::new(Id::unique("about")).show(ctx, |ui| {
                 ui.set_width(320.0);

@@ -364,3 +364,27 @@ fn synthetic_radiograph(w: usize, h: usize, seed: u32) -> Image {
     }
     Image { width: w, height: h, pixels }
 }
+
+#[test]
+fn settings_dialog_saves_clinic_and_preferences() {
+    let (mut h, env) = start("settings");
+    h.run();
+    h.state_mut().open_settings();
+    h.run();
+    assert!(h.query_by_label("Icon Size").is_some(), "General tab is first");
+    type_into(&mut h, "Clinic Name", "Klinik Senyum");
+    click(&mut h, "Big");
+    // Every tab draws without panicking.
+    for tab in settings::Tab::ALL {
+        h.state_mut().settings_dialog.as_mut().unwrap().tab = tab;
+        h.run();
+        // The dialog stays inside the 860 px window on every tab.
+        assert!(h.get_by_label("OK").rect().bottom() < 860.0);
+    }
+    click(&mut h, "OK");
+    assert!(h.state().settings_dialog.is_none());
+    assert_eq!(h.state().settings.icon_size, lumodent::settings::IconSize::Big);
+    assert_eq!(h.state().report.clinic.name, "Klinik Senyum");
+    let saved = lumodent::settings::Settings::load(&env.dir.join("data").join("settings.txt"));
+    assert_eq!(saved.icon_size, lumodent::settings::IconSize::Big);
+}
