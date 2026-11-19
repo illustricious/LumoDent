@@ -4,6 +4,8 @@ use crate::patients::{PatientStore, Statement};
 
 /// DICOM modality for intraoral radiographs. The literal appears in the reference executable.
 pub const INTRAORAL: &str = "IO";
+/// Pass as the modality filter to list studies of every modality.
+pub const ANY_MODALITY: &str = "";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Study {
@@ -91,7 +93,7 @@ impl PatientStore {
         let mut stmt = self.prepare(
             "SELECT pk,patient_id,accession_number,sop_instance_uid,patient_age,modality,
             body_part_examined,image_name,image_type,description,datetime,created_datetime
-            FROM Study WHERE modality=?1 AND patient_id=?2
+            FROM Study WHERE (?1='' OR modality=?1) AND patient_id=?2
             AND created_datetime>=?3 AND created_datetime<=?4 ORDER BY pk",
         )?;
         stmt.bind_text(1, modality)?;
@@ -228,6 +230,7 @@ mod tests {
         db.add_study(&Study { modality: "PX".into(), ..study("A", "pano.bmp") }).unwrap();
         db.add_study(&study("B", "B_00000001.bmp")).unwrap();
 
+        assert_eq!(db.studies("A", ANY_MODALITY, ALL.0, ALL.1).unwrap().len(), 3);
         let rows = db.studies("A", INTRAORAL, ALL.0, ALL.1).unwrap();
         let names: Vec<_> = rows.iter().map(|s| s.image_name.as_str()).collect();
         assert_eq!(names, ["A_00000001.bmp", "A_00000002.bmp"]);

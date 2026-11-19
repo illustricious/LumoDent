@@ -5,7 +5,7 @@
 use crate::image::{decode, Image};
 use crate::patients::{Patient, PatientStore};
 use crate::reports::{encode_bmp, Clinic, Draft, ReportDoc};
-use crate::studies::{folder_name, Report, Study, INTRAORAL};
+use crate::studies::{folder_name, Report, Study, ANY_MODALITY, INTRAORAL};
 use crate::users::UserStore;
 use std::path::{Path, PathBuf};
 
@@ -71,7 +71,7 @@ impl Workspace {
     // ---- studies --------------------------------------------------------
 
     pub fn studies(&self, patient: &Patient) -> Result<Vec<Study>, String> {
-        self.store.studies(&patient.id, INTRAORAL, ALL_DATES.0, ALL_DATES.1)
+        self.store.studies(&patient.id, ANY_MODALITY, ALL_DATES.0, ALL_DATES.1)
     }
 
     /// Copies an image into the patient's folder and records it as a Study.
