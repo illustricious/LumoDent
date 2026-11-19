@@ -24,7 +24,7 @@ jobs:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Linux libraries
         if: runner.os == 'Linux'
@@ -43,7 +43,7 @@ jobs:
           - target: aarch64-pc-windows-msvc
             arch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -57,7 +57,7 @@ jobs:
           wix build packaging/windows/lumodent.wxs -arch ${{ matrix.arch }} `
             -d Version=$version -d ExePath=target/${{ matrix.target }}/release/lumodent.exe `
             -o dist/LumoDent-$version-windows-${{ matrix.arch }}.msi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.arch }}
           path: dist/*.msi
@@ -75,12 +75,12 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libsqlite3-dev libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev
       - run: cargo install cargo-deb --locked
       - run: cargo deb --locked --output dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}
           path: dist/*.deb
@@ -91,7 +91,7 @@ jobs:
     needs: [windows, linux]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
