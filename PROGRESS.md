@@ -104,6 +104,10 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
 | **Jumlah** | | **57** | **81** |
 
+DicomProcessor (didekompilasi dengan Ghidra) adalah pembungkus DCMTK. IsDicom membaca 4 byte di offset 128 dan membandingkan dengan "DICM". GetUid memanggil `dcmGenerateUniqueIdentifier` dengan root OFFIS `1.2.276.0.7230010.3.1.{2,3,4}` untuk study/series/instance. LumoDent tidak memakai root milik OFFIS dan memakai bentuk `2.25.<angka>` yang tidak butuh registrasi. GetCurrentDateTime memanggil `DcmDateTime::getCurrentDateTime` dengan detik dan pecahan, hasilnya `YYYYMMDDHHMMSS.FFFFFF`. GetLocaleEncoding (pemilihan code page CP1252/UTF-8/GB18030 dan lain-lain) tidak diperlukan karena LumoDent menulis teks UTF-8 langsung. InsertElement belum punya padanan publik; elemen tambahan saat menulis ditentukan di dalam `write`.
+
+DataAccessor sudah lengkap. Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
+
 ## Sensor: pemetaan dari IOSensorAcquisition.dll
 
 CFinnoRay membungkus SDK detektor vendor lewat USB. Bagian yang berbicara ke alat sudah dipetakan, tapi belum ditulis ulang karena butuh SDK atau protokol USB-nya dan sensor fisik untuk dites:
