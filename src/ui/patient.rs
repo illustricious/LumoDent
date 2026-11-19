@@ -241,8 +241,8 @@ impl App {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(84.0, 84.0), egui::Sense::hover());
-                ui.painter().circle_filled(rect.center(), 40.0, egui::Color32::from_rgb(0xe4, 0xe4, 0xe4));
-                icons::paint(ui.painter(), rect.shrink(16.0), Icon::Patient, theme::BUTTON);
+                ui.painter().circle_filled(rect.center(), 40.0, theme::button_hover());
+                icons::paint(ui.painter(), rect.shrink(16.0), Icon::Patient, theme::text());
                 ui.add_space(12.0);
                 egui::Grid::new("summary").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
                     let d = patient.as_ref().map(|p| &p.details);
@@ -253,7 +253,7 @@ impl App {
                         ("Date of Birth", d.map(|d| d.birthdate.clone())),
                     ];
                     for (label, value) in rows {
-                        ui.label(RichText::new(label).color(theme::MUTED));
+                        ui.label(RichText::new(label).color(theme::muted()));
                         ui.label(value.unwrap_or_default());
                         ui.end_row();
                     }
@@ -276,12 +276,12 @@ impl App {
             let width = ui.available_width();
             ui.horizontal(|ui| {
                 for (fraction, title) in columns.iter().zip(["Chart No.", "Name", "Date of Birth", "Phone"]) {
-                    ui.add_sized([width * fraction - 8.0, 20.0], egui::Label::new(RichText::new(title).color(theme::MUTED)));
+                    ui.add_sized([width * fraction - 8.0, 20.0], egui::Label::new(RichText::new(title).color(theme::muted())));
                 }
             });
             if self.patients.rows.is_empty() {
                 ui.add_space(12.0);
-                ui.label(RichText::new("No patients to show. Use New Patient to add one.").color(theme::MUTED));
+                ui.label(RichText::new("No patients to show. Use New Patient to add one.").color(theme::muted()));
                 return;
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -355,7 +355,7 @@ impl App {
                 if let Some(p) = &patient {
                     egui::Grid::new("detail").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
                         for (label, value) in FIELDS.iter().zip(values(p)) {
-                            ui.label(RichText::new(*label).color(theme::MUTED));
+                            ui.label(RichText::new(*label).color(theme::muted()));
                             ui.label(value);
                             ui.end_row();
                         }

@@ -74,8 +74,10 @@ fn main() -> eframe::Result {
         APP_NAME,
         options,
         Box::new(move |cc| {
-            ui::theme::apply(&cc.egui_ctx);
-            let workspace = workspace.map_err(|e| format!("Cannot open the data folder: {e}"))?;
+            let workspace = workspace.map_err(|e| format!("Cannot open the data folder: {e}"));
+            let light = workspace.as_ref().is_ok_and(|w| ui::saved_light(&w.data));
+            ui::theme::set_light(&cc.egui_ctx, light);
+            let workspace = workspace?;
             Ok(Box::new(ui::App::new(workspace, ui::Hooks::native())))
         }),
     )

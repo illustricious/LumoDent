@@ -38,7 +38,7 @@ fn start(tag: &str) -> (Harness<'static, App>, Env) {
     let (pick, save, opened) = (env.pick.clone(), env.save.clone(), env.opened.clone());
     let hooks = Hooks {
         pick_image: Box::new(move || pick.borrow().clone()),
-        save_pdf: Box::new(move |_| save.borrow().clone()),
+        save_file: Box::new(move |_, _| save.borrow().clone()),
         open_file: Box::new(move |path| {
             opened.borrow_mut().push(path.to_path_buf());
             Ok(())
@@ -171,8 +171,32 @@ fn viewer_send_to_report_save_export_print_and_delete() {
 
     let size = |h: &Harness<'static, App>| h.state().viewer.image.as_ref().map(|i| (i.width, i.height));
     assert_eq!(size(&h), Some((32, 16)));
-    click(&mut h, "Rotate");
+    click(&mut h, "Rotate Right");
     assert_eq!(size(&h), Some((16, 32)));
+    click(&mut h, "Rotate Left");
+    assert_eq!(size(&h), Some((32, 16)));
+    let png = env.dir.join("shot.png");
+    *env.save.borrow_mut() = Some(png.clone());
+    click(&mut h, "Export Image");
+    assert!(notice(&mut h).starts_with("Image saved to"));
+    assert_eq!(lumodent::image::decode(&std::fs::read(&png).unwrap()).unwrap().width, 32);
+    let dcm = env.dir.join("shot.dcm");
+    *env.save.borrow_mut() = Some(dcm.clone());
+    click(&mut h, "Export DICOM");
+    assert!(notice(&mut h).starts_with("Image saved to"));
+    let tags = lumodent::dicom::parse(&std::fs::read(&dcm).unwrap()).unwrap().tags;
+    assert_eq!(tags.patient_id, h.state().viewer.patient.as_ref().unwrap().id);
+    *env.pick.borrow_mut() = Some(dcm);
+    click(&mut h, "Import Image");
+    assert_eq!(h.state().viewer.studies.len(), 3);
+    assert_eq!(h.state().viewer.image.as_ref().map(|i| (i.width, i.height)), Some((32, 16)));
+    let dcm_study = h.state().viewer.studies[h.state().viewer.current.unwrap()].clone();
+    assert_eq!(dcm_study.sop_instance_uid, tags.sop_instance_uid);
+    click(&mut h, "Delete Image");
+    click(&mut h, "Yes");
+    h.get_by_label_contains("2.").click();
+    h.run();
+    click(&mut h, "Rotate Right");
     click(&mut h, "Invert");
     click(&mut h, "Send to Report");
     assert_eq!(notice(&mut h), "Image sent to report (1 in the current report).");
@@ -270,6 +294,14 @@ fn render_screens() {
     shot(&mut h, "4-report.png");
     h.state_mut().report.draft.doc.landscape = true;
     shot(&mut h, "5-report-landscape.png");
+    h.state_mut().report.draft.doc.landscape = false;
+    theme::set_light(&h.ctx, true);
+    shot(&mut h, "6-light-report.png");
+    click(&mut h, "Viewer");
+    shot(&mut h, "7-light-viewer.png");
+    click(&mut h, "Patient");
+    shot(&mut h, "8-light-patient.png");
+    theme::set_light(&h.ctx, false);
 }
 
 fn seed_demo(dir: &Path) {

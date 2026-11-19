@@ -2,3 +2,4 @@
 # Reverse-engineering material from the reference application stays local.
 /rea-evidence.json
 /reference-startup.jpg
+*.dcm

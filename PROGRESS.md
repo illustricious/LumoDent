@@ -28,7 +28,7 @@ Alamat merupakan VA pada image base `0x400000` untuk NanoPix.exe x86 dengan SHA-
 | 0x563e90 | Mengubah pasien | UpdatePatient pada 0x563f69, jalur berhasil dan pesan kegagalan database terpisah | Ubah data lokal |
 | 0x5613e0 | Menghapus pasien | DeletePatient pada 0x561606, juga ada jalur kegagalan penghapusan berkas citra | Hapus baris pasien, Study/Report ikut terhapus lewat ON DELETE CASCADE, folder citra pasien dihapus dengan pesan kegagalan sendiri |
 | 0x53a090 | Memuat produk | DataAccessor::GetProducts pada 0x53a0b5 | Belum |
-| 0x5200f0 | Menyimpan berkas DICOM | DicomProcessor::SaveDicomFile pada 0x520281 | Belum |
+| 0x5200f0 | Menyimpan berkas DICOM | DicomProcessor::SaveDicomFile pada 0x520281 | Selesai (`src/dicom.rs`, Export DICOM) |
 | 0x50e020 | Membaca ukuran citra sensor | Sensor_GetImageSize pada 0x50e032 | Belum |
 | 0x4f6490 | Jalur koreksi citra | Sensor_CorrectImage pada 0x4f6714 | Belum. Algoritma piksel belum dipetakan |
 | 0x580ff0 | Panel pencarian dan pengaturan layout | Referensi Child_Search, Child_Recent, teeth_layout, viewer_layout, template, Child_Table | Bagian pencarian pasien |
@@ -99,10 +99,10 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 |---|---|---:|---:|
 | DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
 | ImageProcessing | Olah citra | 5 (RotateImage, FlipX, FlipY, Invert, BrightnessAndContrast; rumus milik rewrite) | 17 |
-| DicomProcessor | DICOM | 0 | 6 |
+| DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
-| **Jumlah** | | **21** | **81** |
+| **Jumlah** | | **22** | **81** |
 
 Belum dikerjakan di DataAccessor: Analysis, Product, User, CloudUser dan basis data User (18 metode). Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
 
@@ -121,3 +121,12 @@ Antarmuka Win32 ditulis ulang dengan egui 0.37 (eframe, renderer wgpu: Direct3D 
 Dialog konfirmasi dan pesan memakai modal egui dengan teks yang sama seperti versi Win32. Dialog berkas memakai `rfd` (dialog native di Windows dan macOS, xdg-desktop-portal di Linux). Folder data: `%LOCALAPPDATA%\LumoDent` di Windows, `~/Library/Application Support/LumoDent` di macOS, `$XDG_DATA_HOME/lumodent` atau `~/.local/share/lumodent` di Linux; `LUMODENT_DATA` mengganti lokasi.
 
 Uji UI `src/ui/tests.rs` memakai `egui_kittest`: tombol, daftar dan kolom teks ditemukan lewat pohon aksesibilitas, sehingga uji yang sama berlaku di semua OS. Pemeriksaan aksesibilitas bawaan kittest memastikan setiap kontrol punya nama. `render_screens` (diabaikan secara default) merender setiap layar ke `target/screens` dengan data demo.
+
+## DICOM
+
+`src/dicom.rs` membaca dan menulis berkas DICOM Part 10 tanpa pustaka DICOM pihak ketiga.
+
+- Baca: Implicit VR LE, Explicit VR LE, Deflated LE, JPEG baseline/extended (8-bit), dan dataset tanpa header Part 10. Piksel 8/16-bit, signed, bits stored, rescale slope/intercept, window center/width, MONOCHROME1/2, RGB (interleaved dan planar). Sequence dilewati. Belum: big endian, JPEG lossless, JPEG 2000, RLE, multi-frame JPEG. Berkas multi-frame native hanya menampilkan frame pertama.
+- Tulis: Explicit VR LE 8-bit. Gambar abu-abu menjadi Digital Intra-Oral X-Ray (For Presentation, modality IO), gambar berwarna menjadi Secondary Capture. Atribut pasien dan studi diambil dari database; UID memakai root `2.25`.
+- Import `.dcm` mengisi SOP Instance UID, modality, accession number, body part, deskripsi dan waktu studi dari berkas. Bila Patient ID di berkas berbeda, gambar tetap diimpor dan muncul peringatan.
+- Belum diuji dengan berkas DICOM dari sensor atau PACS sungguhan; tes memakai berkas buatan sendiri.

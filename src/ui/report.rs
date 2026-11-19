@@ -116,7 +116,7 @@ impl App {
     pub fn export_pdf(&mut self) -> Result<(), String> {
         let bytes = self.pdf_bytes()?;
         let name = self.pdf_name();
-        let Some(path) = (self.hooks.save_pdf)(&name) else { return Ok(()) };
+        let Some(path) = (self.hooks.save_file)(&name, "pdf") else { return Ok(()) };
         std::fs::write(&path, bytes).map_err(|e| format!("Export PDF failed: {e}"))?;
         self.notice = Some(format!("Report exported to {}", path.display()));
         Ok(())
@@ -292,7 +292,7 @@ impl App {
                 });
                 ui.add_space(8.0);
                 let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                ui.painter().rect_filled(rect, 0.0, theme::EDGE);
+                ui.painter().rect_filled(rect, 0.0, theme::edge());
                 self.paint_page(ui, rect, &page_textures);
             });
     }

@@ -12,8 +12,11 @@ pub struct Image {
 
 pub(crate) const MAX_PIXELS: usize = 1 << 27;
 
-/// Decodes BMP with the built-in reader and PNG or JPEG with the image crate.
+/// Decodes DICOM and BMP with the built-in readers and PNG or JPEG with the image crate.
 pub fn decode(data: &[u8]) -> Result<Image, String> {
+    if crate::dicom::is_dicom(data) {
+        return crate::dicom::parse(data).map(|d| d.image);
+    }
     if data.starts_with(b"BM") {
         return decode_bmp(data);
     }
@@ -134,6 +137,25 @@ impl Image {
         (self.width, self.height) = (h, w);
     }
 
+    pub fn rotate_counter_clockwise(&mut self) {
+        let (w, h) = (self.width, self.height);
+        let mut out = vec![0; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                out[(w - 1 - x) * h + y] = self.pixels[y * w + x];
+            }
+        }
+        self.pixels = out;
+        (self.width, self.height) = (h, w);
+    }
+
+    /// Writes the image as a PNG file.
+    pub fn save_png(&self, path: &std::path::Path) -> Result<(), String> {
+        let rgb: Vec<u8> = self.pixels.iter().flat_map(|p| [(p >> 16) as u8, (p >> 8) as u8, *p as u8]).collect();
+        ::image::save_buffer(path, &rgb, self.width as u32, self.height as u32, ::image::ExtendedColorType::Rgb8)
+            .map_err(|e| format!("Fail to save the image: {e}"))
+    }
+
     pub fn flip_horizontal(&mut self) {
         for row in self.pixels.chunks_mut(self.width) {
             row.reverse();
@@ -213,6 +235,16 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotations_are_inverse() {
+        let start = Image { width: 3, height: 2, pixels: (0..6).collect() };
+        let mut i = start.clone();
+        i.rotate_clockwise();
+        assert_eq!((i.width, i.height, i.pixels[0]), (2, 3, 3));
+        i.rotate_counter_clockwise();
+        assert_eq!(i.pixels, start.pixels);
+    }
 
     fn bmp(bpp: u16, width: i32, height: i32, palette: &[u32], rows: &[&[u8]]) -> Vec<u8> {
         let offset = 54 + palette.len() * 4;

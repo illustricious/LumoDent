@@ -25,6 +25,9 @@ pub enum Icon {
     ZoomIn,
     ZoomOut,
     Rotate,
+    RotateLeft,
+    Reset,
+    ExportImage,
     FlipH,
     FlipV,
     Invert,
@@ -184,11 +187,27 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, color: Color32) {
             p.rect_stroke(Rect::from_min_max(at(0.28, 0.58), at(0.72, 0.88)), 1.0, s, StrokeKind::Middle);
             p.circle_filled(at(0.78, 0.48), w * 0.035, color);
         }
-        Icon::Rotate => {
-            let pts = arc(c, w * 0.32, -PI * 0.15, PI * 1.45);
+        Icon::Rotate | Icon::RotateLeft => {
+            // The left arrow is the right one mirrored about the centre.
+            let m = if icon == Icon::RotateLeft { -1.0 } else { 1.0 };
+            let pts: Vec<Pos2> = arc(c, w * 0.32, -PI * 0.15, PI * 1.45).into_iter().map(|q| pos2(c.x + (q.x - c.x) * m, q.y)).collect();
             let end = *pts.last().unwrap();
             p.add(Shape::line(pts, s));
-            arrow_head(p, end + vec2(w * 0.12, w * 0.02), vec2(1.0, 0.25), w * 0.18, color);
+            arrow_head(p, end + vec2(w * 0.12 * m, w * 0.02), vec2(m, 0.25), w * 0.18, color);
+        }
+        Icon::Reset => {
+            let pts = arc(c, w * 0.3, PI * 0.25, PI * 1.85);
+            let start = pts[0];
+            p.add(Shape::line(pts, s));
+            arrow_head(p, start + vec2(w * 0.02, -w * 0.1), vec2(0.3, -1.0), w * 0.18, color);
+            p.circle_filled(c, w * 0.06, color);
+        }
+        Icon::ExportImage => {
+            let frame = Rect::from_min_max(at(0.12, 0.2), at(0.72, 0.8));
+            p.rect_stroke(frame, 1.0, s, StrokeKind::Middle);
+            p.add(Shape::line(vec![at(0.16, 0.72), at(0.34, 0.5), at(0.46, 0.62), at(0.58, 0.44), at(0.68, 0.72)], s));
+            p.line_segment([at(0.62, 0.5), at(0.9, 0.5)], s);
+            arrow_head(p, at(0.94, 0.5), vec2(1.0, 0.0), w * 0.16, color);
         }
         Icon::FlipH | Icon::FlipV => {
             let (a, b, axis): (Vec<Pos2>, Vec<Pos2>, [Pos2; 2]) = if icon == Icon::FlipH {
@@ -258,22 +277,22 @@ pub fn logo(ui: &mut Ui, size: Vec2) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let p = ui.painter_at(rect);
     let c = pos2(rect.center().x, rect.top() + 24.0);
-    p.circle_filled(c, 19.0, theme::ACCENT);
-    p.circle_filled(c + vec2(5.0, -4.0), 16.0, theme::BACK);
+    p.circle_filled(c, 19.0, theme::accent());
+    p.circle_filled(c + vec2(5.0, -4.0), 16.0, theme::back());
     let font = FontId::proportional(26.0);
-    let lumo = p.layout_no_wrap("Lumo".into(), font.clone(), theme::TEXT);
-    let dent = p.layout_no_wrap("Dent".into(), font, theme::ACCENT_LIGHT);
+    let lumo = p.layout_no_wrap("Lumo".into(), font.clone(), theme::text());
+    let dent = p.layout_no_wrap("Dent".into(), font, theme::accent_light());
     let x = rect.center().x - (lumo.size().x + dent.size().x) / 2.0;
     let y = rect.top() + 46.0;
     let lumo_w = lumo.size().x;
-    p.galley(pos2(x, y), lumo, theme::TEXT);
-    p.galley(pos2(x + lumo_w, y), dent, theme::ACCENT_LIGHT);
+    p.galley(pos2(x, y), lumo, theme::text());
+    p.galley(pos2(x + lumo_w, y), dent, theme::accent_light());
     p.text(
         pos2(rect.center().x, y + 34.0),
         Align2::CENTER_TOP,
         format!("by {}", lumodent::DEVELOPER),
         FontId::proportional(12.0),
-        theme::MUTED,
+        theme::muted(),
     );
 }
 
@@ -292,20 +311,20 @@ pub fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, size: Vec2, layout: 
     response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         let fill = if !enabled {
-            theme::DISABLED
+            theme::disabled()
         } else if selected {
-            theme::ACCENT
+            theme::accent()
         } else if response.is_pointer_button_down_on() {
-            theme::BUTTON_DOWN
+            theme::button_down()
         } else if response.hovered() {
-            theme::BUTTON_HOVER
+            theme::button_hover()
         } else {
-            theme::BUTTON
+            theme::button()
         };
-        let text = if enabled { theme::TEXT } else { theme::MUTED };
+        let text = if enabled { theme::text() } else { theme::muted() };
         let p = ui.painter();
         p.rect_filled(rect, CornerRadius::same(3), fill);
-        p.rect_stroke(rect, CornerRadius::same(3), Stroke::new(1.0, theme::EDGE), StrokeKind::Inside);
+        p.rect_stroke(rect, CornerRadius::same(3), Stroke::new(1.0, theme::edge()), StrokeKind::Inside);
         let font = FontId::proportional(if layout == Layout::Stacked && size.y < 60.0 { 13.0 } else { 15.0 });
         match (icon, layout) {
             (Some(icon), Layout::Stacked) => {

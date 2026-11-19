@@ -46,7 +46,8 @@ pub struct Confirm {
 /// Operating-system services, replaceable in tests.
 pub struct Hooks {
     pub pick_image: Box<dyn FnMut() -> Option<PathBuf>>,
-    pub save_pdf: Box<dyn FnMut(&str) -> Option<PathBuf>>,
+    /// Asks where to save a file: suggested name and extension ("pdf", "png").
+    pub save_file: Box<dyn FnMut(&str, &str) -> Option<PathBuf>>,
     pub open_file: Box<dyn FnMut(&Path) -> Result<(), String>>,
 }
 
@@ -56,13 +57,13 @@ impl Hooks {
             pick_image: Box::new(|| {
                 rfd::FileDialog::new()
                     .set_title("Import Image")
-                    .add_filter("Image Files (.jpg .jpeg .png .bmp)", &lumodent::workspace::IMPORT_EXTENSIONS)
+                    .add_filter("Image Files (.jpg .jpeg .png .bmp .dcm)", &lumodent::workspace::IMPORT_EXTENSIONS)
                     .pick_file()
             }),
-            save_pdf: Box::new(|name| {
+            save_file: Box::new(|name, ext| {
                 rfd::FileDialog::new()
-                    .set_title("Export PDF")
-                    .add_filter("PDF", &["pdf"])
+                    .set_title("Save As")
+                    .add_filter(ext.to_uppercase(), &[ext])
                     .set_file_name(name)
                     .save_file()
             }),
@@ -125,6 +126,14 @@ impl App {
         let loaded = app.refresh_patients();
         app.check(loaded);
         app
+    }
+
+    /// Switches between the dark and light palette and remembers the choice.
+    pub fn set_theme(&mut self, ctx: &egui::Context, light: bool) {
+        theme::set_light(ctx, light);
+        let saved = std::fs::write(theme_path(&self.ws.data), if light { "light" } else { "dark" })
+            .map_err(|e| format!("Cannot save the theme: {e}"));
+        self.check(saved);
     }
 
     /// Shows an error from an operation in the notice dialog.
@@ -200,13 +209,13 @@ impl App {
     /// Draws the whole window into `ui`.
     pub fn show(&mut self, ui: &mut Ui) {
         self.left_width = (ui.max_rect().width() * 0.17).clamp(200.0, 260.0);
-        ui.painter().rect_filled(ui.max_rect(), 0.0, theme::BACK);
+        ui.painter().rect_filled(ui.max_rect(), 0.0, theme::back());
         egui::Panel::top("menu")
-            .frame(egui::Frame::new().fill(theme::EDGE).inner_margin(Margin::symmetric(6, 2)))
+            .frame(egui::Frame::new().fill(theme::edge()).inner_margin(Margin::symmetric(6, 2)))
             .show(ui, |ui| self.menu(ui));
         egui::Panel::top("header")
             .exact_size(112.0)
-            .frame(egui::Frame::new().fill(theme::BACK).inner_margin(Margin { left: 8, right: 12, top: 6, bottom: 0 }))
+            .frame(egui::Frame::new().fill(theme::back()).inner_margin(Margin { left: 8, right: 12, top: 6, bottom: 0 }))
             .show(ui, |ui| self.header(ui));
         match self.screen {
             Screen::Patient => self.patient_screen(ui),
@@ -226,7 +235,14 @@ impl App {
                 }
             });
             ui.menu_button("Tools", |ui| {
-                ui.add_enabled(false, egui::Button::new("Settings"));
+                ui.menu_button("Theme", |ui| {
+                    for (light, label) in [(false, "Dark"), (true, "Light")] {
+                        if ui.radio(theme::is_light() == light, label).clicked() {
+                            self.set_theme(ui.ctx(), light);
+                            ui.close();
+                        }
+                    }
+                });
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("About").clicked() {
@@ -343,7 +359,7 @@ impl eframe::App for App {
 
 /// A heading line inside a panel, in the reference application's caps style.
 pub fn section(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(15.0).color(theme::TEXT));
+    ui.label(RichText::new(text).size(15.0).color(theme::text()));
     ui.add_space(2.0);
 }
 
@@ -364,13 +380,13 @@ pub fn list_row(
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         let fill = if selected {
-            theme::ACCENT
+            theme::accent()
         } else if response.hovered() {
-            theme::BUTTON
+            theme::button()
         } else if stripe {
-            Color32::from_rgb(0x4c, 0x4c, 0x4c)
+            theme::stripe()
         } else {
-            theme::PANEL
+            theme::panel()
         };
         p.rect_filled(rect, 2.0, fill);
         let mut x = rect.left() + 6.0;
@@ -388,10 +404,19 @@ pub fn list_row(
                 egui::Align2::LEFT_CENTER,
                 *text,
                 egui::FontId::proportional(14.0),
-                theme::TEXT,
+                theme::text(),
             );
             offset += text_width * fraction;
         }
     }
     response
+}
+
+fn theme_path(data: &Path) -> PathBuf {
+    data.join("theme.txt")
+}
+
+/// Whether the saved theme is the light palette (dark is the default).
+pub fn saved_light(data: &Path) -> bool {
+    std::fs::read_to_string(theme_path(data)).is_ok_and(|s| s.trim() == "light")
 }

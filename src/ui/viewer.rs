@@ -115,7 +115,15 @@ impl App {
         let Some(patient) = self.viewer.patient.clone() else { return Ok(()) };
         let Some(path) = (self.hooks.pick_image)() else { return Ok(()) };
         let study = self.ws.import_image(&patient, &path)?;
-        self.load_studies(Some(study.pk))
+        self.load_studies(Some(study.pk))?;
+        // A DICOM file names its own patient; warn when it is someone else.
+        if study.image_type == "dcm" {
+            let other = std::fs::read(&path).ok().and_then(|b| lumodent::dicom::parse(&b).ok()).map(|d| d.tags.patient_id);
+            if let Some(id) = other.filter(|id| !id.is_empty() && *id != patient.id) {
+                self.notice = Some(format!("The DICOM file belongs to patient ID {id}, not {}. It was imported for {} anyway.", patient.id, patient.id));
+            }
+        }
+        Ok(())
     }
 
     pub fn delete_image(&mut self, study: &Study) -> Result<(), String> {
@@ -125,6 +133,46 @@ impl App {
         self.viewer.image = None;
         self.load_studies(None)?;
         removed
+    }
+
+    /// Saves the image as displayed (with tone changes) as PNG or DICOM ("png", "dcm").
+    pub fn export_image(&mut self, ext: &str) -> Result<(), String> {
+        let Some(image) = self.viewer.snapshot() else { return Ok(()) };
+        let stem = self.viewer.current.and_then(|i| self.viewer.studies.get(i)).map(|s| s.image_name.clone()).unwrap_or_else(|| "image".into());
+        let stem = std::path::Path::new(&stem).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(stem);
+        let Some(path) = (self.hooks.save_file)(&format!("{stem}.{ext}"), ext) else { return Ok(()) };
+        if ext == "dcm" {
+            let (Some(patient), Some(study)) = (self.viewer.patient.clone(), self.viewer.current.and_then(|i| self.viewer.studies.get(i)).cloned()) else { return Ok(()) };
+            std::fs::write(&path, lumodent::dicom::write(&image, &patient, &study)).map_err(|e| format!("Fail to save the image: {e}"))?;
+        } else {
+            image.save_png(&path)?;
+        }
+        self.notice = Some(format!("Image saved to {}.", path.display()));
+        Ok(())
+    }
+
+    /// Keyboard shortcuts for the viewer canvas.
+    fn viewer_keys(&mut self, ui: &Ui, canvas: Rect) {
+        if self.viewer.image.is_none() || ui.ctx().egui_wants_keyboard_input() {
+            return;
+        }
+        use egui::Key;
+        let pressed = |k: Key| ui.input(|i| i.key_pressed(k));
+        let center = (canvas.size() / 2.0).to_pos2();
+        if pressed(Key::Plus) || pressed(Key::Equals) { self.zoom(1.25, canvas, center); }
+        if pressed(Key::Minus) { self.zoom(0.8, canvas, center); }
+        if pressed(Key::R) { self.viewer.edit(Image::rotate_clockwise); }
+        if pressed(Key::L) { self.viewer.edit(Image::rotate_counter_clockwise); }
+        if pressed(Key::H) { self.viewer.edit(Image::flip_horizontal); }
+        if pressed(Key::V) { self.viewer.edit(Image::flip_vertical); }
+        if pressed(Key::I) { self.viewer.edit(Image::invert); }
+        if pressed(Key::F) || pressed(Key::Num0) { self.viewer.viewport = Viewport::default(); }
+        let step = if pressed(Key::ArrowDown) { 1 } else if pressed(Key::ArrowUp) { -1 } else { 0 };
+        if step != 0 && !self.viewer.studies.is_empty() {
+            let last = self.viewer.studies.len() as i64 - 1;
+            let next = (self.viewer.current.map_or(0, |c| c as i64 + step)).clamp(0, last) as usize;
+            if Some(next) != self.viewer.current { self.open_study(next); }
+        }
     }
 
     pub fn send_to_report(&mut self) {
@@ -207,9 +255,10 @@ impl App {
             .show(ui, |ui| {
                 let has_image = self.viewer.image.is_some();
                 ui.horizontal(|ui| {
-                    let size = vec2(110.0, 58.0);
-                    let tools: [(Icon, &str, fn(&mut Image)); 4] = [
-                        (Icon::Rotate, "Rotate", Image::rotate_clockwise),
+                    let size = vec2(82.0, 58.0);
+                    let tools: [(Icon, &str, fn(&mut Image)); 5] = [
+                        (Icon::RotateLeft, "Rotate Left", Image::rotate_counter_clockwise),
+                        (Icon::Rotate, "Rotate Right", Image::rotate_clockwise),
                         (Icon::FlipH, "Flip Horizontal", Image::flip_horizontal),
                         (Icon::FlipV, "Flip Vertical", Image::flip_vertical),
                         (Icon::Invert, "Invert", Image::invert),
@@ -225,11 +274,20 @@ impl App {
                     if icons::button(ui, Some(Icon::Send), "Send to Report", size, IconLayout::Stacked, has_image, false).clicked() {
                         self.send_to_report();
                     }
+                    if icons::button(ui, Some(Icon::ExportImage), "Export Image", size, IconLayout::Stacked, has_image, false).clicked() {
+                        let saved = self.export_image("png");
+                        self.check(saved);
+                    }
+                    if icons::button(ui, Some(Icon::ExportImage), "Export DICOM", size, IconLayout::Stacked, has_image, false).clicked() {
+                        let saved = self.export_image("dcm");
+                        self.check(saved);
+                    }
                 });
                 ui.add_space(6.0);
                 let bar = 44.0;
                 let canvas_size = vec2(ui.available_width(), (ui.available_height() - bar - 6.0).max(80.0));
                 let canvas = self.canvas(ui, canvas_size);
+                self.viewer_keys(ui, canvas);
                 ui.add_space(6.0);
                 theme::panel_frame().inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -247,6 +305,12 @@ impl App {
                         ui.add_space(12.0);
                         let caption = ui.label("Contrast");
                         changed |= ui.add(egui::Slider::new(&mut self.viewer.contrast, -100..=100).show_value(false)).labelled_by(caption.id).changed();
+                        ui.add_space(12.0);
+                        let tone = self.viewer.brightness != 0 || self.viewer.contrast != 0;
+                        if icons::button(ui, Some(Icon::Reset), "Reset", vec2(96.0, 30.0), IconLayout::Inline, has_image && tone, false).clicked() {
+                            (self.viewer.brightness, self.viewer.contrast) = (0, 0);
+                            changed = true;
+                        }
                         if changed {
                             self.viewer.refresh();
                         }
@@ -265,10 +329,10 @@ impl App {
     fn canvas(&mut self, ui: &mut Ui, size: egui::Vec2) -> Rect {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, theme::CANVAS);
+        painter.rect_filled(rect, 0.0, theme::canvas());
         let Some(image) = &self.viewer.image else {
             let text = if self.viewer.message.is_empty() { "No image selected." } else { &self.viewer.message };
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(15.0), theme::MUTED);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(15.0), theme::muted());
             return rect;
         };
         let (iw, ih) = (image.width, image.height);
@@ -304,7 +368,7 @@ impl App {
             egui::Align2::RIGHT_BOTTOM,
             format!("{iw} × {ih}   {:.0}%", scale * 100.0),
             egui::FontId::proportional(12.0),
-            theme::MUTED,
+            theme::muted(),
         );
         rect
     }

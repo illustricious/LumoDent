@@ -7,7 +7,7 @@ It runs on Windows (x64 and ARM64) and Linux, from one code base built with [egu
 ## Features
 
 - **Patient**: search by chart number, name or phone, quick search for recently acquired or printed patients, nine date filters, create, edit and delete patients.
-- **Viewer**: import JPG, PNG and BMP radiographs, thumbnails, rotate, flip, invert, brightness and contrast, pan and zoom.
+- **Viewer**: import JPG, PNG, BMP and DICOM radiographs, export PNG and DICOM, thumbnails, rotate, flip, invert, brightness and contrast, pan and zoom.
 - **Report**: send images from the viewer, paper size and orientation, clinic header, notes, save and reopen reports, export to PDF and print.
 - **Acquisition**: not available yet (sensor support is still being mapped).
 

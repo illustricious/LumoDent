@@ -9,7 +9,7 @@ use crate::studies::{folder_name, Report, Study, INTRAORAL};
 use std::path::{Path, PathBuf};
 
 pub const ALL_DATES: (&str, &str) = ("", "9999-12-31 23:59:59");
-pub const IMPORT_EXTENSIONS: [&str; 4] = ["jpg", "jpeg", "png", "bmp"];
+pub const IMPORT_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "dcm"];
 
 pub struct Workspace {
     pub store: PatientStore,
@@ -78,9 +78,10 @@ impl Workspace {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .filter(|e| IMPORT_EXTENSIONS.contains(&e.as_str()))
-            .ok_or("Only .jpg, .jpeg, .png and .bmp images can be imported.")?;
+            .ok_or("Only .jpg, .jpeg, .png, .bmp and .dcm images can be imported.")?;
         let bytes = std::fs::read(source).map_err(io)?;
         decode(&bytes)?;
+        let tags = crate::dicom::is_dicom(&bytes).then(|| crate::dicom::parse(&bytes).map(|d| d.tags)).transpose()?.unwrap_or_default();
         let dir = self.image_dir(&patient.id);
         std::fs::create_dir_all(&dir).map_err(io)?;
         let seed = nanos() as u32;
@@ -92,11 +93,14 @@ impl Workspace {
         std::fs::write(&path, &bytes).map_err(io)?;
         let mut study = Study {
             patient_id: patient.id.clone(),
-            sop_instance_uid: format!("2.25.{}", nanos() ^ ((std::process::id() as u128) << 96)),
-            modality: INTRAORAL.into(),
+            sop_instance_uid: if tags.sop_instance_uid.is_empty() { crate::dicom::new_uid() } else { tags.sop_instance_uid },
+            modality: if tags.modality.is_empty() { INTRAORAL.into() } else { tags.modality },
+            accession_number: tags.accession_number,
+            body_part_examined: tags.body_part,
+            description: tags.description,
             image_name: name,
             image_type: kind,
-            datetime: crate::dates::local_timestamp(),
+            datetime: if tags.datetime.is_empty() { crate::dates::local_timestamp() } else { tags.datetime },
             ..Default::default()
         };
         match self.store.add_study(&study) {
