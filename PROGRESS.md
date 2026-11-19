@@ -146,6 +146,6 @@ Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan
 | Invert | 0x100c1ed0 | `v = min(param, TYPE_MAX) − v` | Viewer memberi nilai max citra |
 | GetMinMaxIntegerValue | 0x100c0b70 | Min/maks piksel | — |
 | ImageNormalizeEx | 0x100c1270 → 0x100bc310 (8 bit), 0x100bc670 (16 bit) | `clamp((v−min)·(outMax−outMin)/(max−min), outMin, outMax)`, dipotong; outMin tidak ditambahkan sebagai offset; default 0..255 / 0..65535 | 7 call site (akuisisi, laporan) |
-| MatTransfor | 0x100c2080 → 0x100bf590 | Permutasi piksel dengan matriks integer: (x,y) → (a·x+b·y+c, d·x+e·y+f), ukuran output |a·w+b·h| × |d·w+e·h|; hanya format 16 bit | Matriks dari GetFlipTransMatrix |
+| MatTransfor | 0x100c2080 → 0x100bf590 | Permutasi piksel dengan matriks integer: (x,y) → (a·x+b·y+c, d·x+e·y+f), ukuran output abs(a·w+b·h) × abs(d·w+e·h); hanya format 16 bit | Matriks dari GetFlipTransMatrix |
 
 Belum dipetakan (rumus rewrite sendiri): Set, MultiplyConstant, GetAverageValue. GetMinMaxFloatValue hanya untuk citra float (format 6) dan tidak dipakai jalur 16 bit. Fungsi tambahan yang ada di DLL tapi tidak diimpor NanoPix.exe: AddConstant, Copy, DrawImageHists, GammaCorrect, WindowWidthLevel.
