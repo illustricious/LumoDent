@@ -206,3 +206,26 @@ Didecompile dengan Ghidra 12.2 lewat REA (CreateMainDB 0x10037050, CreateUserDB 
 - CheckUserDB referensi membuat ulang basis data bila tabel Product/User hilang dan meng-upgrade versi < 4 tanpa CloudUser. LumoDent cukup membuat tabel yang belum ada (`CREATE TABLE IF NOT EXISTS`), sehingga data lama tidak terhapus.
 - NanoPix.exe (0x56f2b5) membuat admin pertama "Admin" / "123456" dan menyimpan `user_password` sebagai teks biasa; `encryption.dll` hanya dipakai untuk kunci produk dan kode hardware. LumoDent membuat admin yang sama, tetapi menyimpan SHA-256 bergaram 20.000 putaran (`src/sha256.rs`, tanpa crate). Password teks biasa dari basis data NanoPix tetap diterima dan langsung di-hash pada login pertama yang berhasil.
 - Belum ada layar login, manajemen user, maupun layar produk di antarmuka; fungsi ini baru tersedia di lapisan data.
+
+## NanoPix-E 1.3: HdrImageCorrect.dll dan Scilib21.dll
+
+Semua koreksi gambar NanoPix-E sekarang ada di `src/hdr.rs`, tanpa DLL. `Sensor_CorrectImage` (0x10001060) menerima frame 16-bit big-endian, nomor seri sensor (maksimal 8 karakter), lebar, tinggi, flag HDR dan folder kalibrasi. Scilib21.dll adalah pustaka ShadoCam (Rad-icon), terlihat dari header file pixel map.
+
+| Asli | Isi | Rust |
+|---|---|---|
+| Nama file | `<folder>\<seri>_Offset Image`, `_Gain Image`, `_Pixel Map`; mode HDR `_Offset Image0/1`, `_Gain Image0/1` | `calibration_path` |
+| File offset dan gain | w×h nilai 16-bit big-endian; ukuran salah membuat koreksi itu dilewati | `parse_image_file` |
+| ScOffsetCorrection 0x100024d0 | piksel − offset, 16-bit wrapping | `offset_correction` |
+| ScGainCorrection 0x10002510 (dari assembly) | rata-rata gain (signed 16-bit); piksel × rata-rata / gain, dipotong ke arah nol; gain 0 → 0 | `gain_correction` |
+| ScReadPixMap 0x100036a0 | teks diawali "ShadoCam Pixel Map File", entri setelah "$begin": `C x,y0,y1,flag` (kolom), `P x,y`, `R y,x0,x1,flag` (baris), koordinat mulai dari 1; maksimal 0x19000 byte dan 10000 entri; koordinat 0 = error sintaks (kode 8) | `parse_pixel_map` (meniru perilaku strtoul aslinya) |
+| ScCalcPixMapMask 0x10002c30 | bit tetangga yang rusak; untuk entri P hanya entri sesudahnya yang dilihat (perilaku asli) | `calc_masks` |
+| ScFixPixel 0x10002620 | mode 0 rata-rata 8 tetangga sehat; 1 horizontal; 2 vertikal (bobot 2 untuk tetangga langsung, 1 untuk yang berjarak 2); 3 dan 4 memilih arah dengan selisih kuadrat terkecil dari tiga arah, lalu interpolasi berbobot (3−a)/(3−b) | `fix_pixel` |
+| ScPixelCorrection 0x10003220 (metode 2) | kolom dan baris: tiga piksel di tiap ujung memakai arah sederhana, sisanya mode 3 (kolom) atau 4 (baris); piksel tunggal mode 0 | `pixel_correction` |
+| HDR 0x10002000 | lihat di bawah | `hdr_merge`, `detect_bit_depth` |
+| Sensor_CorrectImage | offset, gain (atau HDR), lalu pixel map; error -1, -2, -3 | `correct_image` |
+
+Mode HDR: bit terendah piksel mentah menandai kanalnya (ganjil = kanal 1, 9.19× kurang sensitif). Kedalaman bit ditebak dari rata-rata 10 baris pertama offset kanal 0 (≥1500 → 16 bit, ≥400 → 14, selain itu 12). Piksel ganjil yang terisolasi (tidak ada piksel ganjil lain di 3×3) dipasangkan dengan rata-rata 8 tetangganya untuk menghitung offset kanal 1, ditambah 200/50/12 sesuai kedalaman bit (2000 bila pasangan kurang dari dua). Lalu setiap piksel: ×0.5, koreksi offset per kanal (kanal 1 ×9.19), dibatasi minimal 0, dibagi gain ternormalisasi (nilai di bawah 0.1 dianggap 1), kanal 1 ditambah offsetnya, ×0.5, dibulatkan menjauhi nol, dibatasi nilai maksimum kedalaman bit.
+
+Satu perbedaan yang disengaja: aslinya memberi ScPixelCorrection jumlah entri = (w×h) & 0x7fff, bukan jumlah entri sebenarnya, sehingga sisa isi buffer gain bisa terbaca sebagai entri palsu. LumoDent hanya memakai entri yang ada di file.
+
+Belum diketahui: flag HDR mana yang dipakai NanoPix.exe untuk NanoPix-E, dan apakah frame dari sensor_io.dll memang big-endian (aslinya menukar byte sebelum dan sesudah koreksi).
