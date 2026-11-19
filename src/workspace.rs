@@ -6,6 +6,7 @@ use crate::image::{decode, Image};
 use crate::patients::{Patient, PatientStore};
 use crate::reports::{encode_bmp, Clinic, Draft, ReportDoc};
 use crate::studies::{folder_name, Report, Study, INTRAORAL};
+use crate::users::UserStore;
 use std::path::{Path, PathBuf};
 
 pub const ALL_DATES: (&str, &str) = ("", "9999-12-31 23:59:59");
@@ -13,6 +14,8 @@ pub const IMPORT_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "dcm"];
 
 pub struct Workspace {
     pub store: PatientStore,
+    /// The reference's separate user database: products, sign-in users, cloud accounts.
+    pub users: UserStore,
     pub data: PathBuf,
 }
 
@@ -32,7 +35,8 @@ impl Workspace {
     pub fn open(data: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&data).map_err(io)?;
         let store = PatientStore::open(&data.join("patients.sqlite3"))?;
-        Ok(Self { store, data })
+        let users = UserStore::open(&data.join("users.sqlite3"))?;
+        Ok(Self { store, users, data })
     }
 
     pub fn image_dir(&self, patient_id: &str) -> PathBuf {

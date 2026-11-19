@@ -77,8 +77,22 @@ pub struct Patient {
     pub details: PatientDetails,
 }
 
-// Column order follows the CREATE TABLE literals in CoreLibrary.dll.
-const SCHEMA: [&str; 3] = ["CREATE TABLE IF NOT EXISTS Patient (
+/// One row of the Analysis table: a treatment number attached to a study.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Analysis {
+    pub pk: i64,
+    pub patient_id: String,
+    pub study_pk: i64,
+    pub treatment_no: String,
+    pub created: String,
+    pub updated: String,
+}
+
+/// `PRAGMA user_version` that CreateMainDB writes.
+pub const MAIN_DB_VERSION: i64 = 1;
+
+// Column order follows the CREATE TABLE literals in CoreLibrary.dll (CreateMainDB).
+const SCHEMA: [&str; 4] = ["CREATE TABLE IF NOT EXISTS Patient (
     pk INTEGER PRIMARY KEY, id VARCHAR(250) NOT NULL UNIQUE,
     last_name VARCHAR(250) NOT NULL, first_name VARCHAR(250), sex VARCHAR(250),
     birthdate DATE, doctor VARCHAR(250), social_id VARCHAR(250), phone VARCHAR(250),
@@ -93,6 +107,10 @@ const SCHEMA: [&str; 3] = ["CREATE TABLE IF NOT EXISTS Patient (
     "CREATE TABLE IF NOT EXISTS Report (pk INTEGER PRIMARY KEY,
     patient_id VARCHAR REFERENCES Patient(id) ON UPDATE CASCADE ON DELETE CASCADE,
     project_name VARCHAR(250), created_datetime DATETIME, updated_datetime DATETIME)",
+    "CREATE TABLE IF NOT EXISTS Analysis (pk INTEGER PRIMARY KEY,
+    patient_id VARCHAR REFERENCES Patient(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    study_pk INTEGER REFERENCES study(pk) ON UPDATE CASCADE ON DELETE CASCADE,
+    treatmentNo VARCHAR(250), created_datetime DATETIME, updated_datetime DATETIME)",
 ];
 
 pub struct PatientStore(*mut c_void);
@@ -110,14 +128,91 @@ impl Drop for PatientStore {
 
 impl PatientStore {
     pub fn open(path: &Path) -> Result<Self, String> {
-        Self::connect(path.to_str().ok_or("Invalid UTF-8 database path")?)
+        Self::connect(path.to_str().ok_or("Invalid UTF-8 database path")?, &SCHEMA, MAIN_DB_VERSION)
     }
 
     pub fn in_memory() -> Result<Self, String> {
-        Self::connect(":memory:")
+        Self::connect(":memory:", &SCHEMA, MAIN_DB_VERSION)
     }
 
-    fn connect(filename: &str) -> Result<Self, String> {
+    /// Opens a database, creates any missing table and, on a fresh file, writes
+    /// the `user_version` the reference CreateMainDB/CreateUserDB would.
+    pub(crate) fn connect(filename: &str, schema: &[&str], version: i64) -> Result<Self, String> {
+        let store = Self::connect_raw(filename)?;
+        let fresh = store.user_version()? == 0 && store.table_count()? == 0;
+        for statement in schema {
+            store.prepare(statement)?.finish()?;
+        }
+        if fresh && version != 0 {
+            store.prepare(&format!("PRAGMA user_version = {version}"))?.finish()?;
+        }
+        Ok(store)
+    }
+
+    pub fn user_version(&self) -> Result<i64, String> {
+        let mut stmt = self.prepare("PRAGMA user_version")?;
+        Ok(if stmt.row()? { stmt.int(0) } else { 0 })
+    }
+
+    fn table_count(&self) -> Result<i64, String> {
+        let mut stmt = self.prepare("SELECT count(*) FROM sqlite_master WHERE type='table'")?;
+        Ok(if stmt.row()? { stmt.int(0) } else { 0 })
+    }
+
+    /// AddAnalysis.
+    pub fn add_analysis(&self, patient_id: &str, study_pk: i64, treatment_no: &str) -> Result<i64, String> {
+        let mut stmt = self.prepare("INSERT INTO Analysis VALUES (NULL, ?1, ?2, ?3, ?4, ?4)")?;
+        stmt.bind_text(1, patient_id)?;
+        stmt.bind_int(2, study_pk)?;
+        stmt.bind_text(3, treatment_no)?;
+        stmt.bind_text(4, &self.local_timestamp()?)?;
+        stmt.finish()?;
+        Ok(unsafe { sqlite3_last_insert_rowid(self.0) })
+    }
+
+    /// UpdateAnalysis: keyed by patient and study, as in the reference.
+    pub fn update_analysis(&self, patient_id: &str, study_pk: i64, treatment_no: &str) -> Result<(), String> {
+        let mut stmt = self.prepare("UPDATE Analysis SET treatmentNo=?3, updated_datetime=?4 WHERE patient_id=?1 AND study_pk=?2")?;
+        stmt.bind_text(1, patient_id)?;
+        stmt.bind_int(2, study_pk)?;
+        stmt.bind_text(3, treatment_no)?;
+        stmt.bind_text(4, &self.local_timestamp()?)?;
+        stmt.finish()?;
+        self.require_change("Analysis")
+    }
+
+    /// DeleteAnalysis.
+    pub fn delete_analysis(&self, patient_id: &str, study_pk: i64) -> Result<(), String> {
+        let mut stmt = self.prepare("DELETE FROM Analysis WHERE patient_id=?1 AND study_pk=?2")?;
+        stmt.bind_text(1, patient_id)?;
+        stmt.bind_int(2, study_pk)?;
+        stmt.finish()?;
+        self.require_change("Analysis")
+    }
+
+    /// GetAnalysis: every analysis of one study.
+    pub fn analyses(&self, study_pk: i64) -> Result<Vec<Analysis>, String> {
+        let mut stmt = self.prepare("SELECT pk,patient_id,study_pk,treatmentNo,created_datetime,updated_datetime FROM Analysis WHERE study_pk=?1 ORDER BY pk")?;
+        stmt.bind_int(1, study_pk)?;
+        let mut rows = Vec::new();
+        while stmt.row()? {
+            rows.push(Analysis {
+                pk: stmt.int(0),
+                patient_id: stmt.text(1),
+                study_pk: stmt.int(2),
+                treatment_no: stmt.text(3),
+                created: stmt.text(4),
+                updated: stmt.text(5),
+            });
+        }
+        Ok(rows)
+    }
+
+    pub(crate) fn last_insert(&self) -> i64 {
+        unsafe { sqlite3_last_insert_rowid(self.0) }
+    }
+
+    fn connect_raw(filename: &str) -> Result<Self, String> {
         let filename = CString::new(filename).map_err(|e| e.to_string())?;
         let mut db = ptr::null_mut();
         let status = unsafe { sqlite3_open(filename.as_ptr(), &mut db) };
@@ -127,9 +222,6 @@ impl PatientStore {
         let store = Self(db);
         store.check(status)?;
         store.prepare("PRAGMA foreign_keys=ON")?.finish()?;
-        for statement in SCHEMA {
-            store.prepare(statement)?.finish()?;
-        }
         Ok(store)
     }
 
@@ -362,6 +454,26 @@ mod tests {
         let ids = |rows: Vec<Patient>| rows.into_iter().map(|row| row.id).collect::<Vec<_>>();
         assert_eq!(ids(db.recently_acquired(start, end).unwrap()), ["A"]);
         assert_eq!(ids(db.recently_printed(start, end).unwrap()), ["B"]);
+    }
+
+    #[test]
+    fn analysis_rows_follow_their_study_and_patient() {
+        let db = PatientStore::in_memory().unwrap();
+        assert_eq!(db.user_version().unwrap(), MAIN_DB_VERSION);
+        db.add("A", &PatientDetails::default()).unwrap();
+        db.prepare("INSERT INTO Study (patient_id) VALUES ('A'),('A')").unwrap().finish().unwrap();
+        let pk = db.add_analysis("A", 1, "T-1").unwrap();
+        db.add_analysis("A", 2, "T-2").unwrap();
+        let rows = db.analyses(1).unwrap();
+        assert_eq!((rows.len(), rows[0].pk, rows[0].treatment_no.as_str()), (1, pk, "T-1"));
+        db.update_analysis("A", 1, "T-1b").unwrap();
+        assert_eq!(db.analyses(1).unwrap()[0].treatment_no, "T-1b");
+        assert!(db.update_analysis("A", 9, "x").is_err());
+        db.delete_analysis("A", 1).unwrap();
+        assert!(db.analyses(1).unwrap().is_empty());
+        // Removing the study cascades to its analysis.
+        db.prepare("DELETE FROM Study WHERE pk=2").unwrap().finish().unwrap();
+        assert!(db.analyses(2).unwrap().is_empty());
     }
 
     #[test]

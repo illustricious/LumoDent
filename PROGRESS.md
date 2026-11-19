@@ -97,14 +97,14 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 
 | Kelas | Peran | Sudah di Rust | Total |
 |---|---|---:|---:|
-| DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
+| DataAccessor | Database lokal | 34 (semua: Patient, Recent, Study, Report, Analysis, Create/CheckMainDB di `patients.rs`; Product, User, CloudUser, Create/CheckUserDB di `users.rs`) | 34 |
 | ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 10 algoritma dipetakan dari biner, lihat bagian ImageProcessing) | 17 |
 | DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
-| **Jumlah** | | **34** | **81** |
+| **Jumlah** | | **52** | **81** |
 
-Belum dikerjakan di DataAccessor: Analysis, Product, User, CloudUser dan basis data User (18 metode). Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
+DataAccessor sudah lengkap. Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
 
 ## Antarmuka lintas platform
 
@@ -149,3 +149,18 @@ Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan
 | MatTransfor | 0x100c2080 → 0x100bf590 | Permutasi piksel dengan matriks integer: (x,y) → (a·x+b·y+c, d·x+e·y+f), ukuran output abs(a·w+b·h) × abs(d·w+e·h); hanya format 16 bit | Matriks dari GetFlipTransMatrix |
 
 Belum dipetakan (rumus rewrite sendiri): Set, MultiplyConstant, GetAverageValue. GetMinMaxFloatValue hanya untuk citra float (format 6) dan tidak dipakai jalur 16 bit. Fungsi tambahan yang ada di DLL tapi tidak diimpor NanoPix.exe: AddConstant, Copy, DrawImageHists, GammaCorrect, WindowWidthLevel.
+
+## DataAccessor: basis data User dan Analysis
+
+Didecompile dengan Ghidra 12.2 lewat REA (CreateMainDB 0x10037050, CreateUserDB 0x10037530, CheckUserDB 0x10036df0, AddUser 0x100369e0, GetUsers 0x1003b8a0); statement SQL diambil dari literal di CoreLibrary.dll.
+
+| Basis data | Tabel | user_version | File LumoDent |
+|---|---|---|---|
+| Utama (CreateMainDB) | Patient, Study, Report, Analysis | 1 | `patients.sqlite3` |
+| User (CreateUserDB) | Product, User, CloudUser | 0 | `users.sqlite3` |
+
+- Analysis: satu nomor perawatan (treatmentNo) per studi; Update/Delete dikunci oleh `patient_id` + `study_pk`, Get per `study_pk`.
+- CloudUser: satu akun per produk; Update/Delete/Get dikunci oleh `product_pk`, terhapus ikut produknya (ON DELETE CASCADE).
+- CheckUserDB referensi membuat ulang basis data bila tabel Product/User hilang dan meng-upgrade versi < 4 tanpa CloudUser. LumoDent cukup membuat tabel yang belum ada (`CREATE TABLE IF NOT EXISTS`), sehingga data lama tidak terhapus.
+- NanoPix.exe (0x56f2b5) membuat admin pertama "Admin" / "123456" dan menyimpan `user_password` sebagai teks biasa; `encryption.dll` hanya dipakai untuk kunci produk dan kode hardware. LumoDent membuat admin yang sama, tetapi menyimpan SHA-256 bergaram 20.000 putaran (`src/sha256.rs`, tanpa crate). Password teks biasa dari basis data NanoPix tetap diterima dan langsung di-hash pada login pertama yang berhasil.
+- Belum ada layar login, manajemen user, maupun layar produk di antarmuka; fungsi ini baru tersedia di lapisan data.
