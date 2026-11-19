@@ -28,6 +28,7 @@ pub enum Icon {
     RotateLeft,
     Reset,
     ExportImage,
+    Measure,
     FlipH,
     FlipV,
     Invert,
@@ -201,6 +202,19 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, color: Color32) {
             p.add(Shape::line(pts, s));
             arrow_head(p, start + vec2(w * 0.02, -w * 0.1), vec2(0.3, -1.0), w * 0.18, color);
             p.circle_filled(c, w * 0.06, color);
+        }
+        Icon::Measure => {
+            let a = at(0.12, 0.7);
+            let dir = vec2(1.0, -0.6).normalized();
+            let n = vec2(-dir.y, dir.x) * w * 0.16;
+            let len = w * 0.88;
+            let b = a + dir * len;
+            p.add(Shape::closed_line(vec![a, b, b + n, a + n], s));
+            for k in 1..6 {
+                let q = a + dir * (len * k as f32 / 6.0);
+                let depth = if k % 2 == 0 { 0.55 } else { 0.35 };
+                p.line_segment([q, q + n * depth], s);
+            }
         }
         Icon::ExportImage => {
             let frame = Rect::from_min_max(at(0.12, 0.2), at(0.72, 0.8));

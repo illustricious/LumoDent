@@ -37,6 +37,16 @@ pub struct Tags {
     pub accession_number: String,
     pub body_part: String,
     pub description: String,
+    /// Pixel Spacing (0028,0030) or Imager Pixel Spacing (0018,1164), as written.
+    pub pixel_spacing: String,
+}
+
+impl Tags {
+    /// Millimetres per pixel (mean of row and column spacing), when the file says.
+    pub fn spacing_mm(&self) -> Option<f64> {
+        let v: Vec<f64> = self.pixel_spacing.split('\\').filter_map(|s| s.trim().parse().ok()).filter(|v: &f64| *v > 0.0).collect();
+        (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+    }
 }
 
 #[derive(Debug)]
@@ -270,6 +280,7 @@ pub fn parse(data: &[u8]) -> Result<Dicom, String> {
         accession_number: e.text(tag(0x0008, 0x0050)),
         body_part: e.text(tag(0x0018, 0x0015)),
         description: e.text(tag(0x0008, 0x103e)),
+        pixel_spacing: Some(e.text(tag(0x0028, 0x0030))).filter(|s| !s.is_empty()).unwrap_or_else(|| e.text(tag(0x0018, 0x1164))),
     };
     let image = match &e.pixels {
         None => return Err("The DICOM file has no image.".into()),
@@ -486,6 +497,14 @@ mod tests {
         assert_eq!((d.tags.sop_instance_uid.as_str(), d.tags.sop_class_uid.as_str()), ("2.25.42", INTRAORAL_CLASS));
         assert_eq!((d.tags.datetime.as_str(), d.tags.accession_number.as_str()), ("2026-11-19 08:30:05", "A7"));
         assert!(crate::image::decode(&bytes).is_ok());
+    }
+
+    #[test]
+    fn pixel_spacing_is_the_mean_in_millimetres() {
+        let mut t = Tags { pixel_spacing: "0.1\\0.12".into(), ..Default::default() };
+        assert!((t.spacing_mm().unwrap() - 0.11).abs() < 1e-9);
+        t.pixel_spacing = String::new();
+        assert_eq!(t.spacing_mm(), None);
     }
 
     #[test]

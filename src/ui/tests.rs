@@ -282,7 +282,11 @@ fn render_screens() {
     shot(&mut h, "2-new-patient.png");
     click(&mut h, "Cancel");
     click(&mut h, "Viewer");
+    h.state_mut().viewer.spacing = Some(0.035);
+    h.state_mut().viewer.measuring = true;
+    h.state_mut().viewer.measures.push([egui::pos2(150.0, 330.0), egui::pos2(270.0, 140.0)]);
     shot(&mut h, "3-viewer.png");
+    h.state_mut().viewer.measuring = false;
     click(&mut h, "Send to Report");
     click(&mut h, "OK");
     h.get_by_label_contains("1.").click();

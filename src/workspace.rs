@@ -116,9 +116,18 @@ impl Workspace {
     }
 
     pub fn load_image(&self, study: &Study) -> Result<Image, String> {
+        self.load_study_image(study).map(|(image, _)| image)
+    }
+
+    /// The image and, for DICOM files that state it, millimetres per pixel.
+    pub fn load_study_image(&self, study: &Study) -> Result<(Image, Option<f64>), String> {
         let path = self.image_dir(&study.patient_id).join(&study.image_name);
         let bytes = std::fs::read(&path).map_err(|e| format!("Cannot open {}: {e}", study.image_name))?;
-        decode(&bytes)
+        if crate::dicom::is_dicom(&bytes) {
+            let d = crate::dicom::parse(&bytes)?;
+            return Ok((d.image, d.tags.spacing_mm()));
+        }
+        decode(&bytes).map(|image| (image, None))
     }
 
     pub fn remove_study(&self, study: &Study) -> Result<(), String> {

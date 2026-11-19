@@ -24,6 +24,13 @@ pub struct ViewerState {
     texture: Option<TextureHandle>,
     texture_stale: bool,
     thumbs: HashMap<i64, Option<TextureHandle>>,
+    /// Millimetres per pixel of the open image, when its file says.
+    pub spacing: Option<f64>,
+    /// Measure mode: dragging on the canvas draws a ruler instead of panning.
+    pub measuring: bool,
+    /// Rulers in image pixel coordinates, cleared when the image changes.
+    pub measures: Vec<[egui::Pos2; 2]>,
+    drawing: Option<[egui::Pos2; 2]>,
 }
 
 pub fn color_image(width: usize, height: usize, pixels: &[u32]) -> ColorImage {
@@ -48,6 +55,8 @@ impl ViewerState {
     pub fn show(&mut self, image: Option<Image>, message: &str) {
         self.image = image;
         self.viewport = Viewport::default();
+        self.measures.clear();
+        self.drawing = None;
         self.message = message.into();
         self.refresh();
     }
@@ -66,6 +75,7 @@ impl ViewerState {
         if let Some(image) = &mut self.image {
             f(image);
             self.viewport = Viewport::default();
+            self.measures.clear();
             self.refresh();
         }
     }
@@ -105,9 +115,15 @@ impl App {
     pub fn open_study(&mut self, index: usize) {
         let Some(study) = self.viewer.studies.get(index) else { return };
         self.viewer.current = Some(index);
-        match self.ws.load_image(study) {
-            Ok(image) => self.viewer.show(Some(image), ""),
-            Err(e) => self.viewer.show(None, &e),
+        match self.ws.load_study_image(study) {
+            Ok((image, spacing)) => {
+                self.viewer.show(Some(image), "");
+                self.viewer.spacing = spacing;
+            }
+            Err(e) => {
+                self.viewer.show(None, &e);
+                self.viewer.spacing = None;
+            }
         }
     }
 
@@ -161,6 +177,7 @@ impl App {
         let center = (canvas.size() / 2.0).to_pos2();
         if pressed(Key::Plus) || pressed(Key::Equals) { self.zoom(1.25, canvas, center); }
         if pressed(Key::Minus) { self.zoom(0.8, canvas, center); }
+        if pressed(Key::M) { self.viewer.measuring = !self.viewer.measuring; }
         if pressed(Key::R) { self.viewer.edit(Image::rotate_clockwise); }
         if pressed(Key::L) { self.viewer.edit(Image::rotate_counter_clockwise); }
         if pressed(Key::H) { self.viewer.edit(Image::flip_horizontal); }
@@ -299,6 +316,10 @@ impl App {
                                 self.zoom(factor, canvas, center.to_pos2());
                             }
                         }
+                        let measure = self.viewer.measuring;
+                        if icons::button(ui, Some(Icon::Measure), t("Measure"), vec2(110.0, 30.0), IconLayout::Inline, has_image, measure).clicked() {
+                            self.viewer.measuring = !measure;
+                        }
                         ui.add_space(16.0);
                         let mut changed = false;
                         let caption = ui.label(t("Brightness"));
@@ -337,7 +358,30 @@ impl App {
             return rect;
         };
         let (iw, ih) = (image.width, image.height);
-        if response.dragged() {
+        let (x, y, scale) = self.viewer.viewport.place((iw, ih), (rect.width() as i32, rect.height() as i32));
+        let origin = rect.min + vec2(x, y);
+        let to_image = |p: egui::Pos2| pos2(((p.x - origin.x) / scale).clamp(0.0, iw as f32), ((p.y - origin.y) / scale).clamp(0.0, ih as f32));
+        if self.viewer.measuring {
+            if response.drag_started() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    let q = to_image(p);
+                    self.viewer.drawing = Some([q, q]);
+                }
+            }
+            if let (Some(line), Some(p)) = (&mut self.viewer.drawing, response.interact_pointer_pos()) {
+                line[1] = to_image(p);
+            }
+            if response.drag_stopped() {
+                if let Some(line) = self.viewer.drawing.take() {
+                    if line[0].distance(line[1]) * scale > 3.0 {
+                        self.viewer.measures.push(line);
+                    }
+                }
+            }
+            if response.secondary_clicked() {
+                self.viewer.measures.pop();
+            }
+        } else if response.dragged() {
             let d = response.drag_delta();
             self.viewer.viewport.pan.0 += d.x;
             self.viewer.viewport.pan.1 += d.y;
@@ -363,6 +407,29 @@ impl App {
         let dest = Rect::from_min_size(rect.min + vec2(x, y), vec2(iw as f32 * scale, ih as f32 * scale));
         if let Some(t) = &self.viewer.texture {
             painter.image(t.id(), dest, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        let spacing = self.viewer.spacing;
+        let to_screen = |q: egui::Pos2| dest.min + q.to_vec2() * dest.width() / iw as f32;
+        for line in self.viewer.measures.iter().chain(self.viewer.drawing.iter()) {
+            let (a, b) = (to_screen(line[0]), to_screen(line[1]));
+            let ruler = Color32::from_rgb(0xff, 0xd2, 0x3f);
+            painter.line_segment([a, b], egui::Stroke::new(3.0, Color32::from_black_alpha(160)));
+            painter.line_segment([a, b], egui::Stroke::new(1.5, ruler));
+            painter.circle_filled(a, 3.0, ruler);
+            painter.circle_filled(b, 3.0, ruler);
+            let pixels = line[0].distance(line[1]) as f64;
+            let text = match spacing {
+                Some(mm) => format!("{:.1} mm", pixels * mm),
+                None => format!("{pixels:.0} px"),
+            };
+            let at = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0) + vec2(8.0, -8.0);
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), ruler);
+            let bg = egui::Rect::from_min_size(at - vec2(0.0, galley.size().y), galley.size()).expand(3.0);
+            painter.rect_filled(bg, 3.0, Color32::from_black_alpha(170));
+            painter.galley(bg.min + vec2(3.0, 3.0), galley, ruler);
+        }
+        if self.viewer.measuring {
+            ui.ctx().set_cursor_icon(if response.hovered() { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default });
         }
         painter.text(
             rect.right_bottom() - vec2(8.0, 6.0),

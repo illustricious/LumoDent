@@ -539,7 +539,7 @@ pub fn list_header(ui: &mut Ui, columns: &[(f32, &str)]) {
     }
 }
 
-const SHORTCUTS: &str = "Viewer shortcuts\n\n+ / -   Zoom in / out\nR / L   Rotate right / left\nH / V   Flip horizontal / vertical\nI   Invert\nF or 0   Fit\nUp / Down   Previous / next image\n\nDouble-click the title bar to maximize or restore.";
+const SHORTCUTS: &str = "Viewer shortcuts\n\n+ / -   Zoom in / out\nR / L   Rotate right / left\nH / V   Flip horizontal / vertical\nI   Invert\nM   Measure (drag to draw, right-click removes the last)\nF or 0   Fit\nUp / Down   Previous / next image\n\nDouble-click the title bar to maximize or restore.";
 
 #[derive(Clone, Copy, PartialEq)]
 enum WindowButton {
@@ -621,4 +621,4 @@ pub fn saved_indonesian(data: &Path) -> bool {
     std::fs::read_to_string(data.join("language.txt")).is_ok_and(|s| s.trim() == "id")
 }
 
-const SHORTCUTS_ID: &str = "Pintasan Penampil\n\n+ / -   Perbesar / perkecil\nR / L   Putar kanan / kiri\nH / V   Balik horizontal / vertikal\nI   Negatif\nF atau 0   Pas layar\nAtas / Bawah   Gambar sebelumnya / berikutnya\n\nKlik ganda title bar untuk membesarkan atau memulihkan.";
+const SHORTCUTS_ID: &str = "Pintasan Penampil\n\n+ / -   Perbesar / perkecil\nR / L   Putar kanan / kiri\nH / V   Balik horizontal / vertikal\nI   Negatif\nM   Ukur (seret untuk menggaris, klik kanan menghapus yang terakhir)\nF atau 0   Pas layar\nAtas / Bawah   Gambar sebelumnya / berikutnya\n\nKlik ganda title bar untuk membesarkan atau memulihkan.";

@@ -129,6 +129,7 @@ pub fn t(en: &'static str) -> &'static str {
         "Brightness" => "Kecerahan",
         "Contrast" => "Kontras",
         "Reset" => "Reset",
+        "Measure" => "Ukur",
         "No image selected." => "Belum ada gambar dipilih.",
         "No images for this patient. Use Import Image to add one." => "Pasien ini belum punya gambar. Gunakan Impor Gambar untuk menambah.",
         "The selected image will be deleted, are you sure to do so?" => "Gambar yang dipilih akan dihapus. Yakin ingin melanjutkan?",
