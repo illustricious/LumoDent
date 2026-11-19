@@ -98,7 +98,7 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 | Kelas | Peran | Sudah di Rust | Total |
 |---|---|---:|---:|
 | DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
-| ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 8 algoritma dipetakan dari disassembly, lihat bagian ImageProcessing) | 17 |
+| ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 10 algoritma dipetakan dari biner, lihat bagian ImageProcessing) | 17 |
 | DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
@@ -133,7 +133,7 @@ Uji UI `src/ui/tests.rs` memakai `egui_kittest`: tombol, daftar dan kolom teks d
 
 ## ImageProcessing: pemetaan dari CoreLibrary.dll
 
-Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan call site di `NanoPix.exe` dengan `llvm-objdump`; Ghidra tidak tersedia sehingga REA tidak punya decompiler. Referensi bekerja pada piksel abu 16 bit (format 4); LumoDent memakai 8 bit sehingga konstanta rentang diskalakan ke 0..255. Hasil di-clamp lalu dipotong (truncate), seperti referensi.
+Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan call site di `NanoPix.exe` dengan `llvm-objdump`, lalu decompile Ghidra 12.2 lewat REA untuk ImageNormalizeEx dan MatTransfor. Referensi bekerja pada piksel abu 16 bit (format 4); LumoDent memakai 8 bit sehingga konstanta rentang diskalakan ke 0..255. Hasil di-clamp lalu dipotong (truncate), seperti referensi.
 
 | Fungsi | Alamat | Algoritma asli | Parameter yang dipakai NanoPix.exe |
 |---|---|---|---|
@@ -145,5 +145,7 @@ Sumber: disassembly `CoreLibrary.dll` 1.1.1.9 (export thunk → fungsi asli) dan
 | AutoBrightnessAndContrast | 0x100be720 | Histogram di jendela B/C, pangkas sisi yang bagian luarnya lebih sedikit sampai (1−ratio) piksel terbuang, lalu kembali ke slider: `c = ln(65536/(hi−lo))·100 + 0.5`; slider di batas → reset 0 | 0x575152: ratio 0.97, batas 100/100 |
 | Invert | 0x100c1ed0 | `v = min(param, TYPE_MAX) − v` | Viewer memberi nilai max citra |
 | GetMinMaxIntegerValue | 0x100c0b70 | Min/maks piksel | — |
+| ImageNormalizeEx | 0x100c1270 → 0x100bc310 (8 bit), 0x100bc670 (16 bit) | `clamp((v−min)·(outMax−outMin)/(max−min), outMin, outMax)`, dipotong; outMin tidak ditambahkan sebagai offset; default 0..255 / 0..65535 | 7 call site (akuisisi, laporan) |
+| MatTransfor | 0x100c2080 → 0x100bf590 | Permutasi piksel dengan matriks integer: (x,y) → (a·x+b·y+c, d·x+e·y+f), ukuran output |a·w+b·h| × |d·w+e·h|; hanya format 16 bit | Matriks dari GetFlipTransMatrix |
 
-Belum dipetakan (rumus rewrite sendiri): ImageNormalizeEx, MatTransfor, Set, MultiplyConstant, GetAverageValue, GetMinMaxFloatValue. Fungsi tambahan yang ada di DLL tapi tidak diimpor NanoPix.exe: AddConstant, Copy, DrawImageHists, GammaCorrect, WindowWidthLevel.
+Belum dipetakan (rumus rewrite sendiri): Set, MultiplyConstant, GetAverageValue. GetMinMaxFloatValue hanya untuk citra float (format 6) dan tidak dipakai jalur 16 bit. Fungsi tambahan yang ada di DLL tapi tidak diimpor NanoPix.exe: AddConstant, Copy, DrawImageHists, GammaCorrect, WindowWidthLevel.

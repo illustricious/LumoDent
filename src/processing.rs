@@ -8,9 +8,9 @@
 //!
 //! Mapped from the binary: Smoothness, Sharpness, MedianSmooth, MultScaleWLN,
 //! BrightnessAndContrast (see `crate::image::levels`), AutoBrightnessAndContrast,
-//! Invert, GetMinMaxIntegerValue. Not mapped yet, rewrite's own math:
-//! ImageNormalizeEx, MatTransfor, and the trivial Set / MultiplyConstant /
-//! GetAverageValue.
+//! Invert, GetMinMaxIntegerValue, ImageNormalizeEx and MatTransfor (the last two
+//! decompiled with Ghidra 12.2 through REA). Not mapped yet, rewrite's own math:
+//! Set, MultiplyConstant, GetAverageValue.
 
 use crate::image::Image;
 
@@ -111,13 +111,25 @@ pub fn min_max(image: &Image) -> (u8, u8) {
     })
 }
 
-/// ImageNormalizeEx (not mapped yet): stretches the used range to 0..255.
-pub fn normalize(image: &mut Image) {
+/// ImageNormalizeEx: `(v − min)·(out_max − out_min)/(max − min)`, clamped to
+/// out_min..out_max and truncated. As in the reference, out_min only bounds the
+/// result; it is not added as an offset. The default range is 0..255.
+pub fn normalize_to(image: &mut Image, out_min: f64, out_max: f64) {
     let (lo, hi) = min_max(image);
-    if hi > lo {
-        let (lo, hi) = (lo as f32, hi as f32);
-        map(image, |v| (v - lo) * MAX / (hi - lo) + 0.5);
+    if hi == lo {
+        return; // The reference divides by zero here.
     }
+    let (lo, hi) = (lo as f64, hi as f64);
+    let scale = (out_max - out_min) / (hi - lo);
+    let curve: [u32; 256] = std::array::from_fn(|v| ((v as f64 - lo) * scale).min(out_max).max(out_min).clamp(0.0, MAX as f64) as u32);
+    for p in &mut image.pixels {
+        *p = curve[(*p >> 16 & 0xff) as usize] << 16 | curve[(*p >> 8 & 0xff) as usize] << 8 | curve[(*p & 0xff) as usize];
+    }
+}
+
+/// ImageNormalizeEx with its default output range.
+pub fn normalize(image: &mut Image) {
+    normalize_to(image, 0.0, MAX as f64);
 }
 
 /// Invert as the viewer calls it: each value becomes `max − value`, where max is
@@ -318,32 +330,26 @@ pub fn auto_brightness_contrast(image: &Image, brightness: i32, contrast: i32, l
     (brightness, contrast)
 }
 
-/// MatTransfor (not mapped yet): resamples through a 3×3 affine matrix mapping
-/// output (x, y, 1) to source coordinates, bilinear; outside pixels become black.
-pub fn transform(image: &mut Image, m: [[f32; 3]; 3]) {
-    let (w, h) = (image.width, image.height);
-    let src = split(image);
-    let mut out: [Plane; 3] = std::array::from_fn(|_| vec![0.0; w * h]);
+/// MatTransfor: moves each source pixel (x, y) to
+/// `(a·x + b·y + c, d·x + e·y + f)` with an integer matrix `[[a, b, c], [d, e, f]]`,
+/// the rotations and flips NanoPix builds (GetFlipTransMatrix). The output is
+/// `|a·w + b·h|` × `|d·w + e·h|`. Pixels mapped outside are dropped (the reference
+/// writes past its buffer there).
+pub fn transform(image: &mut Image, m: [[i64; 3]; 2]) {
+    let (w, h) = (image.width as i64, image.height as i64);
+    let ow = (m[0][0] * w + m[0][1] * h).abs();
+    let oh = (m[1][0] * w + m[1][1] * h).abs();
+    let mut out = vec![0u32; (ow * oh) as usize];
     for y in 0..h {
         for x in 0..w {
-            let (fx, fy) = (x as f32, y as f32);
-            let sx = m[0][0] * fx + m[0][1] * fy + m[0][2];
-            let sy = m[1][0] * fx + m[1][1] * fy + m[1][2];
-            if sx < 0.0 || sy < 0.0 || sx > (w - 1) as f32 || sy > (h - 1) as f32 {
-                continue;
-            }
-            let (x0, y0) = (sx.floor() as usize, sy.floor() as usize);
-            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
-            let (tx, ty) = (sx - x0 as f32, sy - y0 as f32);
-            for c in 0..3 {
-                let s = &src[c];
-                let top = s[y0 * w + x0] * (1.0 - tx) + s[y0 * w + x1] * tx;
-                let bottom = s[y1 * w + x0] * (1.0 - tx) + s[y1 * w + x1] * tx;
-                out[c][y * w + x] = top * (1.0 - ty) + bottom * ty + 0.5;
+            let tx = m[0][0] * x + m[0][1] * y + m[0][2];
+            let ty = m[1][0] * x + m[1][1] * y + m[1][2];
+            if (0..ow).contains(&tx) && (0..oh).contains(&ty) {
+                out[(ty * ow + tx) as usize] = image.pixels[(y * w + x) as usize];
             }
         }
     }
-    join(image, &out);
+    (image.width, image.height, image.pixels) = (ow as usize, oh as usize, out);
 }
 
 #[cfg(test)]
@@ -387,7 +393,8 @@ mod tests {
     fn normalize_stretches_to_full_range() {
         let mut img = grey(4, 1, |x, _| [50, 60, 70, 100][x]);
         normalize(&mut img);
-        assert_eq!(min_max(&img), (0, 255));
+        // 50 × (255/50) lands a hair under 255 in doubles; the reference truncates.
+        assert_eq!(min_max(&img), (0, 254));
     }
 
     #[test]
@@ -464,14 +471,29 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_shift_transforms() {
+    fn integer_matrix_transforms_match_flips_and_rotation() {
         let img = grey(4, 3, |x, y| (x * 10 + y * 50) as u32);
         let mut same = img.clone();
-        transform(&mut same, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        transform(&mut same, [[1, 0, 0], [0, 1, 0]]);
         assert_eq!(same, img);
-        let mut shifted = img.clone();
-        transform(&mut shifted, [[1.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
-        assert_eq!(level(shifted.pixels[0]), 10);
-        assert_eq!(shifted.pixels[3], 0);
+        let mut flipped = img.clone();
+        transform(&mut flipped, [[-1, 0, 3], [0, 1, 0]]);
+        let mut expected = img.clone();
+        expected.flip_horizontal();
+        assert_eq!(flipped, expected);
+        // Clockwise: (x, y) → (h−1−y, x), output h × w.
+        let mut turned = img.clone();
+        transform(&mut turned, [[0, -1, 2], [1, 0, 0]]);
+        let mut expected = img.clone();
+        expected.rotate_clockwise();
+        assert_eq!(turned, expected);
+    }
+
+    #[test]
+    fn normalize_does_not_offset_by_the_output_minimum() {
+        let mut img = grey(3, 1, |x, _| [100, 150, 200][x]);
+        normalize_to(&mut img, 50.0, 250.0);
+        // (v − 100)·2 = 0, 100, 200, then clamped to 50..250.
+        assert_eq!(img.pixels.iter().map(|&p| level(p)).collect::<Vec<_>>(), [50, 100, 200]);
     }
 }
