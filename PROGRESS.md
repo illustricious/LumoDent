@@ -1,0 +1,123 @@
+# LumoDent — progres rewrite Rust
+
+LumoDent adalah aplikasi workstation radiografi intraoral yang ditulis ulang dalam Rust. Developer: illustricious. Perilaku aplikasi dipetakan dari NanoPix 1.1.1.9 sebagai aplikasi referensi. Nama dan logo LumoDent tidak memakai merek dagang NanoPix atau Eighteeth. Seluruh logo dan ikon digambar sebagai vektor dalam kode (`src/ui/icons.rs`); tidak ada bitmap dari paket asli. Antarmuka memakai egui sehingga kode yang sama berjalan di Windows (x64 dan ARM64), Linux dan macOS.
+
+## Titik awal
+
+Milestone pertama adalah alur Patient di Windows. Alur ini melintasi navigasi, formulir, penyimpanan lokal dan pencarian sehingga dapat diuji dari UI sampai ke data tanpa sensor. Aplikasi Rust memiliki event loop, kontrol dan penyimpanan sendiri. Versi awal memakai Win32 dan bitmap dari paket asli; keduanya sudah diganti (lihat bagian Antarmuka lintas platform).
+
+| Hasil yang dapat diperiksa | Verifikasi |
+|---|---|
+| 23 rutin dipetakan | 13 rutin di executable dan 10 metode di CoreLibrary.dll. Sebagian masih pada tingkat pemanggilan API, khususnya koreksi citra dan DICOM |
+| Build Rust | Windows x64 dan ARM64 dari mesin ini. Linux dan macOS memakai kode yang sama tetapi belum dibuild di sini |
+| Data pasien | Tes Cargo pasien lulus. Uji UI headless mencakup tambah, pencarian cocok/kosong, ubah, buka ulang, batal hapus dan konfirmasi hapus |
+| Dua pencarian aktivitas dan sembilan preset tanggal | Kueri diuji dengan studi/laporan sintetis. Batas kalender pilihan rewrite perlu dibandingkan dengan produk asli |
+| Studi dan Viewer | Tabel Study/Report dengan skema asli, impor BMP/PNG/JPEG, daftar citra per pasien, rotasi, flip, invert, zoom, pan, brightness/contrast. Tes inti dan uji UI headless lulus |
+| Kesamaan tampilan | [Referensi startup asli](reference-startup.jpg) tersedia. Kesetaraan seluruh layar masih terbuka |
+
+## Peta fungsi executable
+
+Alamat merupakan VA pada image base `0x400000` untuk NanoPix.exe x86 dengan SHA-256 `1125f89f6c7b31a4c7674dc225ed89dfcba38a6a97072306c16d1346954af739`. Nama peran di bawah merupakan interpretasi dari pseudocode Ghidra. Panggilan dan literal adalah pengamatan statis. Simpanan REA memuat 23 rekaman, termasuk pseudocode, xref, batas prosedur dan profil analisis. Awalan ID di tabel dapat dicari dalam [bundle bukti](rea-evidence.json).
+
+| VA | Fungsi yang dipetakan | Bukti dalam badan fungsi | Cakupan Rust |
+|---|---|---|---|
+| 0x4896c0 | Startup dan loop jendela | Menyiapkan font/ikon, membuat jendela NanoPix 1024 × 768, mengatur batas ukuran, memanggil swap buffers sampai jendela ditutup | Jendela utama egui (`src/main.rs`, `src/ui/mod.rs`) |
+| 0x4eb520 | Pembuatan jendela tambahan | Membuat window berjudul sementara “No Title Yet”, memasang callback posisi, ukuran, keyboard, mouse | Belum |
+| 0x563550 | Memuat daftar pasien | Memanggil DataAccessor::GetPatients pada 0x5638ec lalu menyerahkan hasil ke rutin lain | Pencarian dan pemuatan lokal |
+| 0x560a80 | Menambah pasien | AddPatient pada 0x560d1c, hasil nol memicu pemuatan ulang daftar | Tambah dan perbarui daftar |
+| 0x563e90 | Mengubah pasien | UpdatePatient pada 0x563f69, jalur berhasil dan pesan kegagalan database terpisah | Ubah data lokal |
+| 0x5613e0 | Menghapus pasien | DeletePatient pada 0x561606, juga ada jalur kegagalan penghapusan berkas citra | Hapus baris pasien, Study/Report ikut terhapus lewat ON DELETE CASCADE, folder citra pasien dihapus dengan pesan kegagalan sendiri |
+| 0x53a090 | Memuat produk | DataAccessor::GetProducts pada 0x53a0b5 | Belum |
+| 0x5200f0 | Menyimpan berkas DICOM | DicomProcessor::SaveDicomFile pada 0x520281 | Belum |
+| 0x50e020 | Membaca ukuran citra sensor | Sensor_GetImageSize pada 0x50e032 | Belum |
+| 0x4f6490 | Jalur koreksi citra | Sensor_CorrectImage pada 0x4f6714 | Belum. Algoritma piksel belum dipetakan |
+| 0x580ff0 | Panel pencarian dan pengaturan layout | Referensi Child_Search, Child_Recent, teeth_layout, viewer_layout, template, Child_Table | Bagian pencarian pasien |
+| 0x58d2d0 | Pengaturan tampilan | Kelompok fullscreen, layout, magnifier, warna capture, jarak dan warna grid | Belum |
+| 0x5aaa00 | Daftar laporan | Merujuk ID kontrol ##ReportList | Belum |
+
+Enam baris pertama berasal dari batch `ev_793b9224`, empat berikutnya dari `ev_ba7c8460`, dan tiga terakhir dari `ev_39cf3168`. Inventaris `ev_8564a21d` mencatat 25.801 prosedur dan 4.320 string. Inventaris mencakup thunk serta kode pustaka, sehingga jumlahnya tidak mengukur persentase fitur yang selesai.
+
+## Peta lapisan data dan antarmuka
+
+- [Peta CoreLibrary.dll](DOMAIN.md) menelusuri sepuluh fungsi tambahan dari nama ekspor ke instruksi yang mereferensikan SQL. Alamat di dokumen tersebut berupa RVA DLL.
+- [Pemetaan UI](UI.md) mendokumentasikan layar referensi dan cakupan interaksi.
+- CorradeIcons.dll menyimpan tabel 230 nama PNG dan rentang datanya. Rewrite tidak memakainya: label tombol mengikuti teks UI referensi, sedangkan ikon digambar ulang sebagai vektor.
+- FinCloud adalah proses Electron terpisah. Di `FinCloud/resources/app.asar`, manifest menunjuk `dist-electron/main.js`. Entry tersebut membuat BrowserWindow, memuat `../dist/index.html` pada jalur rilis, dan meneruskan argumen proses ke renderer saat menerima pesan `treeUrl`. Koneksi layanan, login dan sinkronisasi belum diverifikasi saat berjalan.
+- [Cara build dan pengujian](BUILD.md) menjelaskan toolchain serta lokasi executable.
+
+## Urutan pekerjaan berikut
+
+| Tahap | Kriteria selesai | Status |
+|---|---|---|
+| 1. Patient | Layar pasien, CRUD, persistensi, pencarian dan verifikasi terhadap aplikasi asli | Implementasi awal tersedia. Lihat batas cakupan UI dan data di atas |
+| 2. Studi dan Viewer | Dari pasien terpilih, buka studi contoh dan cocokkan thumbnail, orientasi, zoom serta pan | Implementasi awal tersedia untuk BMP, PNG dan JPEG. DICOM, thumbnail bergambar, penyimpanan hasil edit dan pembandingan dengan aplikasi asli masih terbuka |
+| 3. Report | Buat laporan dari studi, simpan, buka kembali dan bandingkan halaman keluaran | Implementasi awal tersedia: Send to Report, pengaturan kertas, header/footer, info klinik, catatan, simpan/muat ulang/hapus dan cetak. Pembandingan halaman dengan aplikasi referensi masih terbuka |
+| 4. Acquisition | Cocokkan siklus perangkat, ukuran citra dan keluaran koreksi terhadap rekaman uji serta sensor yang sesuai | Dua titik integrasi native telah dipetakan |
+| 5. Fungsi lintas modul | Verifikasi pengaturan, interoperabilitas database lama, registrasi, FinCloud, launcher, pembaruan, lokalisasi dan distribusi | Terbuka |
+
+## Tahap 2: Studi dan Viewer
+
+Literal SQL di CoreLibrary.dll memberi skema lengkap. Study berisi `pk`, `patient_id` (FK ke `Patient(id)` dengan `ON UPDATE CASCADE ON DELETE CASCADE`), `accession_number` (default 0), `sop_instance_uid`, `patient_age`, `modality`, `body_part_examined`, `image_name`, `image_type`, `description`, `datetime`, lalu dua timestamp. Report berisi `pk`, `patient_id`, `project_name` dan dua timestamp. Literal Report hanya memuat `project_name` karena string kolom bersama digabung oleh compiler, sehingga FK `patient_id` pada Report diasumsikan sama dengan Study.
+
+| Bagian | Bukti asli | Implementasi Rust |
+|---|---|---|
+| Data Study | INSERT, UPDATE (nama, jenis, deskripsi), DELETE per PK, SELECT per modalitas, pasien dan rentang waktu | `src/studies.rs`. Urutan PK dipilih karena kueri asli tidak memiliki ORDER BY |
+| Data Report | INSERT, UPDATE hanya `updated_datetime`, DELETE, SELECT per pasien dan rentang waktu | `src/studies.rs`. Belum ada UI |
+| Modalitas | Literal `IO` di NanoPix.exe, parameter `ModalityType` di GetStudies | Viewer memakai `IO` |
+| Nama berkas | Pola `%s/%s_%08X` di NanoPix.exe | `images/<chart no.>/<chart no.>_<8 hex>.<ekstensi asli>` di folder data. Byte berkas disalin apa adanya dan `image_type` mencatat ekstensinya. Arti nilai heks asli belum diketahui, rewrite memakai bit waktu |
+| Format impor | Filter `Image Files (.jpg .jpeg .png .bmp .dcm)` | BMP (1/4/8/16/24/32 bit) dengan dekoder Rust, PNG dan JPEG melalui crate `image` (Rust murni, sama di semua OS). Orientasi EXIF JPEG belum diterapkan. DICOM masih terbuka |
+| Operasi citra | Ekspor `RotateImage`, `FlipY`, `Invert`, `BrightnessAndContrast`, label `Flip Horizontal`/`Flip Vertical` | `src/image.rs`. Rumus piksel adalah pilihan rewrite. Edit hanya pada tampilan, tidak disimpan |
+| Kanvas | Layout `viewer_layout`, kontrol zoom | `src/ui/viewer.rs`: tekstur GPU, drag untuk pan, roda mouse untuk zoom di titik kursor, tombol zoom dan Fit, thumbnail di daftar citra |
+
+SOP Instance UID dibuat di bawah akar `2.25.` dari waktu dan PID. Ini belum UUID penuh dan perlu diganti saat DICOM diimplementasikan. `patient_age` dibiarkan kosong karena format tanggal lahir di formulir masih bebas.
+
+Uji UI `ui::tests::viewer_send_to_report_save_export_print_and_delete` mengimpor PNG dan JPEG, menolak berkas bukan citra, memutar, membalik warna dan mengirim citra ke laporan. Uji `workspace::tests` memeriksa penamaan berkas, penghapusan studi dan penghapusan folder pasien.
+
+## Tahap 3: Report
+
+String UI aplikasi referensi menetapkan isi layar Report: `REPORT LIST`, `New Report`, `Save Report`, `Load Report`, `Print`, `Paper Size`, `Paper Orientation` (`Portrait`/`Landscape`), `Header Show`, `Footer Show`, `Clinic Information` (`Clinic Name`, `Clinic Address`, `Clinic Phone`), `Note`, serta `Send to Report` dari Viewer. Pesan seperti `Unable to save an empty report.`, `Save report successful, you can reload the report and edit it later.` dan `Delete report error, remove report file failed` dipakai ulang apa adanya. report.dll asli berbasis MFC dengan `PrintDlgW` dan print preview.
+
+| Bagian | Implementasi Rust |
+|---|---|
+| Model laporan | `src/reports.rs`: kertas A4, A5, Letter, B5 (JIS), orientasi, header/footer, catatan, daftar citra. Format proyek `report.txt` milik rewrite dengan escape baris baru dan penolakan nama berkas berisi path |
+| Tata letak halaman | Blok header klinik, baris pasien, grid citra yang memilih jumlah kolom paling dekat ke rasio 4:3, catatan, footer. Margin 12 mm |
+| Penyimpanan | `reports/<chart no.>/<chart no.>_<waktu>/` berisi `report.txt` dan `img_NN.bmp`. Baris `Report` memakai `project_name` = nama folder. Simpan ulang memperbarui `updated_datetime` dan menulis ulang citra |
+| Info klinik | `clinic.txt` di folder data, dipakai di semua laporan |
+| Layar | `src/ui/report.rs`: daftar laporan, toolbar, panel klinik/catatan/citra dengan thumbnail, pratinjau halaman langsung |
+| PDF dan cetak | `src/pdf.rs` menulis PDF satu halaman (Helvetica bawaan, citra RGB terkompresi Flate) dengan tata letak yang sama dengan pratinjau. `Export PDF` menyimpan lewat dialog Save, `Print` membuka PDF di penampil bawaan sistem untuk dicetak. Dialog cetak Win32 versi sebelumnya sudah diganti karena khusus Windows |
+| Hapus pasien | Folder citra dan laporan pasien ikut dihapus, draf laporan pasien dibuang |
+
+`Send to Report` mengambil citra seperti yang tampil di Viewer, termasuk rotasi, flip, invert dan brightness/contrast. Aplikasi referensi menyimpan JPG (`Send to report error, save jpg file failed`). Rewrite menyimpan BMP 24 bit supaya tidak menambah encoder.
+
+Uji UI headless menyimpan laporan, mengekspor PDF, mencetak ke penampil (hook uji), membuka ulang laporan dari daftar, menanyakan konfirmasi sebelum membuang perubahan, menghapus laporan dan menghapus pasien. Uji `pdf::tests` memvalidasi xref, ukuran halaman, teks dan jumlah citra.
+
+## Cakupan fungsi
+
+Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, spdlog, crashpad, Boost, CRT). Persentase dari angka itu tidak bermakna. Ukuran yang dipakai adalah metode kelas aplikasi yang diimpor dari DLL inti:
+
+| Kelas | Peran | Sudah di Rust | Total |
+|---|---|---:|---:|
+| DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
+| ImageProcessing | Olah citra | 5 (RotateImage, FlipX, FlipY, Invert, BrightnessAndContrast; rumus milik rewrite) | 17 |
+| DicomProcessor | DICOM | 0 | 6 |
+| CFinnoRay | Sensor akuisisi | 0 | 18 |
+| AnalysisServerAccessor | Layanan cloud | 0 | 6 |
+| **Jumlah** | | **21** | **81** |
+
+Belum dikerjakan di DataAccessor: Analysis, Product, User, CloudUser dan basis data User (18 metode). Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
+
+## Antarmuka lintas platform
+
+Antarmuka Win32 ditulis ulang dengan egui 0.37 (eframe, renderer wgpu: Direct3D 12 di Windows termasuk ARM64, Vulkan atau GL di Linux, Metal di macOS). Logika non-UI pindah ke pustaka agar dapat diuji tanpa jendela.
+
+| Lapisan | Berkas | Isi |
+|---|---|---|
+| Inti | `src/workspace.rs` | Folder data: impor citra, hapus studi, simpan/muat/hapus laporan, info klinik, hapus pasien beserta berkasnya |
+| Inti | `src/pdf.rs`, `src/reports.rs` | PDF laporan dan model teks halaman yang dipakai bersama pratinjau |
+| Inti | `src/dates.rs` | Waktu lokal lewat `chrono` (sebelumnya `GetLocalTime`) |
+| Inti | `src/patients.rs` | SQLite sistem: `winsqlite3` di Windows (raw-dylib), `libsqlite3` di Linux/macOS |
+| UI | `src/ui/` | `theme.rs` palet, `icons.rs` ikon vektor dan tombol, `patient.rs`, `viewer.rs`, `report.rs`, `mod.rs` header, navigasi, menu dan dialog |
+
+Dialog konfirmasi dan pesan memakai modal egui dengan teks yang sama seperti versi Win32. Dialog berkas memakai `rfd` (dialog native di Windows dan macOS, xdg-desktop-portal di Linux). Folder data: `%LOCALAPPDATA%\LumoDent` di Windows, `~/Library/Application Support/LumoDent` di macOS, `$XDG_DATA_HOME/lumodent` atau `~/.local/share/lumodent` di Linux; `LUMODENT_DATA` mengganti lokasi.
+
+Uji UI `src/ui/tests.rs` memakai `egui_kittest`: tombol, daftar dan kolom teks ditemukan lewat pohon aksesibilitas, sehingga uji yang sama berlaku di semua OS. Pemeriksaan aksesibilitas bawaan kittest memastikan setiap kontrol punya nama. `render_screens` (diabaikan secara default) merender setiap layar ke `target/screens` dengan data demo.

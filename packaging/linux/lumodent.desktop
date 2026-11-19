@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LumoDent
+GenericName=Intraoral X-ray Workstation
+Comment=Manage patients, view intraoral radiographs and print reports
+Exec=lumodent
+Icon=lumodent
+Terminal=false
+Categories=Graphics;Viewer;MedicalSoftware;
+StartupWMClass=lumodent

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- The LumoDent mark: a crescent of light over a dark disc. -->
+  <defs>
+    <mask id="crescent">
+      <rect width="64" height="64" fill="black"/>
+      <circle cx="32" cy="34" r="20" fill="white"/>
+      <circle cx="38" cy="28" r="17" fill="black"/>
+    </mask>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="#2c343e"/>
+  <rect width="64" height="64" fill="#8fb8e0" mask="url(#crescent)"/>
+</svg>

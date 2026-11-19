@@ -1,0 +1,32 @@
+<!-- MSI for LumoDent (WiX Toolset v5). Build with:
+     wix build packaging/windows/lumodent.wxs -arch x64|arm64 -d Version=0.2.0 -d ExePath=path/to/lumodent.exe -o LumoDent.msi -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="LumoDent" Manufacturer="illustricious" Version="$(Version)"
+           UpgradeCode="5f6b2a9e-3c1d-4e8a-9b47-2d6c8e1f0a35" Scope="perMachine">
+    <SummaryInformation Description="LumoDent intraoral X-ray workstation" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of LumoDent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="LumoDent">
+        <Component Id="MainExecutable" Guid="8d2e4f61-7a3b-4c95-b1d8-6e0f2a7c9b14">
+          <File Id="LumoDentExe" Source="$(ExePath)" Name="lumodent.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="c3a7e9d2-5b14-4f60-8e2a-91d7b4c6f083">
+        <Shortcut Id="LumoDentShortcut" Name="LumoDent" Description="Intraoral X-ray workstation"
+                  Target="[INSTALLFOLDER]lumodent.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="Software\illustricious\LumoDent" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="LumoDent">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

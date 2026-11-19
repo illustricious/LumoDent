@@ -1,0 +1,37 @@
+[package]
+name = "lumodent"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.95"
+description = "Intraoral X-ray workstation"
+authors = ["illustricious"]
+publish = false
+readme = "README.md"
+
+[dependencies]
+# wgpu renders through Direct3D 12 on Windows (including ARM64), Vulkan or GL on Linux and Metal on macOS.
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "wgpu", "wayland", "x11"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rfd = "0.18"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+miniz_oxide = "0.8"
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+
+[package.metadata.deb]
+maintainer = "illustricious"
+copyright = "illustricious"
+section = "graphics"
+priority = "optional"
+depends = "$auto, libsqlite3-0"
+extended-description = "Patient records, intraoral radiograph viewer and printable reports. A Rust rewrite of the NanoPix workstation software."
+assets = [
+    ["target/release/lumodent", "usr/bin/", "755"],
+    ["packaging/linux/lumodent.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/lumodent.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
+[profile.release]
+lto = "thin"
+strip = true
