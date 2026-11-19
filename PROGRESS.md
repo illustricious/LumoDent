@@ -125,6 +125,15 @@ Seri sensor (tabel di 0x10004f00), sekarang `sensor::MODELS`:
 | 1500 | NanoPix 1.5 | 1200 × 1650 | 251 |
 | 2000 | NanoPix 2 | 1300 × 1800 | 281 |
 
+### NanoPix-E 1.3 (Eighteeth) memakai SDK lain
+
+Dialog registrasi produk (NanoPix.exe 0x583830, `##sensorSize`) punya empat pilihan: NanoPix 1 (0), NanoPix 2 (1), NanoPix 1.5 (2) dan **NanoPix-E 1.3 (3)**. Registrasi di 0x53ab00 membagi jalur: tipe 0 sampai 2 lewat CFinnoRay (IOSensorAcquisition.dll, tabel di atas), tipe 3 lewat jalur 0x50c930 / 0x50e1b0 yang memanggil API `Sensor_*`:
+
+- `sensor_io.dll` (PDB `HDR_MultiDevice`, USB Cypress `CCyUSBEndPoint`): Sensor_OpenDevice, Sensor_GetImageSize, Sensor_GetImageBits, Sensor_GetXrayState, Sensor_SetIntegrationTime, Sensor_SetHdrValue, Sensor_SetBinningMode dan lain-lain.
+- `HdrImageCorrect.dll`: Sensor_CorrectImage, Sensor_LoadRawImage, Sensor_GetHdrMode. Ini koreksi gambar murni perangkat lunak, jadi bisa ditulis ulang tanpa alat.
+
+Ukuran sensor NanoPix-E dibaca dari alat (Sensor_GetImageSize), tidak ada di tabel CFinnoRay.
+
 Semua yang tidak butuh alat sudah ada di `src/sensor.rs`:
 
 | Asli | Isi | Rust |
