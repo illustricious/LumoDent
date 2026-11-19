@@ -257,4 +257,4 @@ Fitur yang tadinya hanya tersimpan di Pengaturan sekarang dipakai:
 - **Layout 1x1, 1x2, 2x1, 2x2** (tombol layout atau Pengaturan): sel pertama berisi gambar yang dibuka dengan semua alat, sel lain menampilkan gambar berikutnya (diperkecil maksimal 1024 px); klik sel untuk membukanya.
 - **Layar Akuisisi**: panel generator DC/AC, kV dan mA seperti NanoPix, langsung tersimpan ke Pengaturan. Pengambilan gambar tetap menunggu driver sensor.
 
-Anotasi belum ikut tercetak saat Kirim ke Laporan atau Ekspor; itu disimpan terpisah dari piksel gambar.
+Anotasi (bentuk, memo dan penggaris, tanpa grid dan lensa) ikut tercetak saat Kirim ke Laporan, Ekspor Gambar dan Ekspor DICOM: `src/ui/burn.rs` membangun shape egui yang sama dengan di layar, egui men-tessellate-nya (teks memakai atlas font yang sama), lalu segitiganya diisi ke piksel gambar. Ukurannya mengikuti zoom saat itu (tidak pernah lebih tipis dari tampilan 100%), jadi hasil cetak terlihat seperti di layar. DICOM berwarna karena anotasi disimpan sebagai Secondary Capture.

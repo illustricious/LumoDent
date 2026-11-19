@@ -330,6 +330,7 @@ fn render_screens() {
     ]);
     h.state_mut().viewer.measures.push([p(150.0, 330.0), p(270.0, 140.0)]);
     shot(&mut h, "12-annotations-grid.png");
+    h.state().burned_snapshot().unwrap().save_png(&out.join("12b-burned-export.png")).unwrap();
     h.state_mut().viewer.tool = Tool::Memo;
     h.state_mut().viewer.memo_edit = Some((p(420.0, 300.0), "Recall".into()));
     shot(&mut h, "13-memo-editor.png");
@@ -455,6 +456,26 @@ fn viewer_tools_grid_layout_memo_and_generator() {
     click(&mut h, "Karies");
     click(&mut h, "Add Memo");
     assert_eq!(h.state().viewer.marks.last(), Some(&Mark::Memo { at: p(3.0, 3.0), text: "Karies".into() }));
+    // Exports carry the annotations in their pixels: a green line over a
+    // grey picture leaves green pixels, a memo leaves its box colour.
+    let clean = env.dir.join("clean.png");
+    let marked = env.dir.join("marked.png");
+    let saved = h.state().viewer.marks.clone();
+    h.state_mut().viewer.marks.clear();
+    *env.save.borrow_mut() = Some(clean.clone());
+    click(&mut h, "Export Image");
+    notice(&mut h);
+    h.state_mut().viewer.marks = saved;
+    *env.save.borrow_mut() = Some(marked.clone());
+    click(&mut h, "Export Image");
+    notice(&mut h);
+    let read = |p: &PathBuf| lumodent::image::decode(&std::fs::read(p).unwrap()).unwrap();
+    let (clean, marked) = (read(&clean), read(&marked));
+    let differing = clean.pixels.iter().zip(&marked.pixels).filter(|(a, b)| a != b).count();
+    assert!(differing > 20, "annotations changed only {differing} pixels");
+    let line = h.state().settings.line.color;
+    let green = line[1] > line[0] && marked.pixels.iter().any(|p| ((p >> 8) & 0xff) > ((p >> 16) & 0xff) + 40);
+    assert!(green, "the line colour shows up in the export");
     click(&mut h, "Clear Annotations");
     assert!(h.state().viewer.marks.is_empty());
 

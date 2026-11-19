@@ -5,6 +5,7 @@
 pub mod i18n;
 pub mod icons;
 mod acquisition;
+mod burn;
 mod patient;
 mod report;
 mod settings;
@@ -125,6 +126,8 @@ pub struct App {
     pub(crate) settings_dialog: Option<settings::Dialog>,
     started: bool,
     acquisition_patient: Option<Patient>,
+    /// The egui context of the last frame, for burning annotations outside drawing.
+    ctx: Option<egui::Context>,
     pub hooks: Hooks,
     left_width: f32,
 }
@@ -146,6 +149,7 @@ impl App {
             settings_dialog: None,
             started: false,
             acquisition_patient: None,
+            ctx: None,
             hooks,
             left_width: 180.0,
         };
@@ -251,6 +255,7 @@ impl App {
 
     /// Draws the whole window into `ui`.
     pub fn show(&mut self, ui: &mut Ui) {
+        self.ctx = Some(ui.ctx().clone());
         if !self.started {
             self.started = true;
             ui.ctx().set_zoom_factor(self.settings.icon_size.zoom());

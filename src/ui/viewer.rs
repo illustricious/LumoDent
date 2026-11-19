@@ -9,6 +9,7 @@ use lumodent::processing;
 use lumodent::patients::Patient;
 use lumodent::reports::Draft;
 use lumodent::studies::Study;
+use super::burn::{annotation_shapes, burn};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -38,6 +39,8 @@ pub struct ViewerState {
     /// A memo being typed: where it goes and its text.
     pub memo_edit: Option<(egui::Pos2, String)>,
     pub grid: bool,
+    /// Screen pixels per image pixel when the image was last drawn.
+    pub(super) last_scale: f32,
     /// Downscaled images for the other cells of a multi-image layout.
     previews: HashMap<i64, Option<(TextureHandle, [usize; 2])>>,
 }
@@ -95,9 +98,6 @@ fn rgba(c: lumodent::settings::Rgba) -> Color32 {
     Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])
 }
 
-fn pen(style: lumodent::settings::Stroke) -> egui::Stroke {
-    egui::Stroke::new(style.thickness as f32, rgba(style.color))
-}
 
 pub fn color_image(width: usize, height: usize, pixels: &[u32]) -> ColorImage {
     let rgb: Vec<u8> = pixels.iter().flat_map(|p| [(p >> 16) as u8, (p >> 8) as u8, *p as u8]).collect();
@@ -189,6 +189,21 @@ impl App {
         Ok(())
     }
 
+    /// The image as displayed, with tone changes and the annotations drawn
+    /// into its pixels at the size they had on screen.
+    pub fn burned_snapshot(&self) -> Option<Image> {
+        let mut image = self.viewer.snapshot()?;
+        if let Some(ctx) = &self.ctx {
+            let scale = if self.viewer.last_scale > 0.0 { self.viewer.last_scale } else { 1.0 };
+            let mm_per_px = self.settings.mm_per_pixel(self.viewer.spacing);
+            // Never thinner than at 100% zoom, so lines stay visible on zoomed-in images.
+            let k = (1.0 / scale).max(1.0);
+            let shapes = annotation_shapes(ctx, &self.settings, &self.viewer.marks, &self.viewer.measures, mm_per_px, &|q| q, k);
+            burn(ctx, &mut image, shapes);
+        }
+        Some(image)
+    }
+
     pub fn open_study(&mut self, index: usize) {
         let Some(study) = self.viewer.studies.get(index) else { return };
         self.viewer.current = Some(index);
@@ -230,7 +245,7 @@ impl App {
 
     /// Saves the image as displayed (with tone changes) as PNG or DICOM ("png", "dcm").
     pub fn export_image(&mut self, ext: &str) -> Result<(), String> {
-        let Some(image) = self.viewer.snapshot() else { return Ok(()) };
+        let Some(image) = self.burned_snapshot() else { return Ok(()) };
         let stem = self.viewer.current.and_then(|i| self.viewer.studies.get(i)).map(|s| s.image_name.clone()).unwrap_or_else(|| "image".into());
         let stem = std::path::Path::new(&stem).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(stem);
         let Some(path) = (self.hooks.save_file)(&format!("{stem}.{ext}"), ext) else { return Ok(()) };
@@ -273,7 +288,7 @@ impl App {
 
     pub fn send_to_report(&mut self) {
         let Some(patient) = self.viewer.patient.clone() else { return };
-        let Some(image) = self.viewer.snapshot() else {
+        let Some(image) = self.burned_snapshot() else {
             self.notice = Some(t("Error with send image to report, please retry.").into());
             return;
         };
@@ -656,50 +671,11 @@ impl App {
             (Tool::Draw, s) if s.len() > 1 => Some(Mark::Draw(s.to_vec())),
             _ => None,
         };
-        for mark in self.viewer.marks.iter().chain(preview_mark.iter()) {
-            match mark {
-                Mark::Line([a, b]) => {
-                    painter.line_segment([to_screen(*a), to_screen(*b)], pen(st.line));
-                }
-                Mark::Rectangle([a, b]) => {
-                    painter.rect_stroke(Rect::from_two_pos(to_screen(*a), to_screen(*b)), 0.0, pen(st.rectangle), egui::StrokeKind::Middle);
-                }
-                Mark::Ellipse([a, b]) => {
-                    let r = Rect::from_two_pos(to_screen(*a), to_screen(*b));
-                    painter.add(egui::epaint::EllipseShape::stroke(r.center(), r.size() / 2.0, pen(st.ellipse)));
-                }
-                Mark::Draw(points) => {
-                    painter.add(egui::Shape::line(points.iter().map(|q| to_screen(*q)).collect(), pen(st.draw)));
-                }
-                Mark::Memo { at, text } => {
-                    let galley = painter.layout(text.clone(), egui::FontId::proportional(14.0), rgba(st.memo_text), 320.0);
-                    let at = to_screen(*at);
-                    let bg = Rect::from_min_size(at, galley.size()).expand(5.0);
-                    painter.rect_filled(bg, 4.0, rgba(st.memo_outer));
-                    painter.galley(at, galley, rgba(st.memo_text));
-                }
-            }
-        }
-
-        let style = st.length;
-        let show_unit = st.length_unit;
         let measuring = if tool == Tool::Measure { self.viewer.stroke.first().zip(self.viewer.stroke.last()).map(|(a, b)| [*a, *b]) } else { None };
-        for line in self.viewer.measures.iter().chain(measuring.iter()) {
-            let (a, b) = (to_screen(line[0]), to_screen(line[1]));
-            let ruler = rgba(style.color);
-            let width = style.thickness as f32;
-            painter.line_segment([a, b], egui::Stroke::new(width + 1.5, Color32::from_black_alpha(160)));
-            painter.line_segment([a, b], egui::Stroke::new(width, ruler));
-            painter.circle_filled(a, width + 1.5, ruler);
-            painter.circle_filled(b, width + 1.5, ruler);
-            let mm = line[0].distance(line[1]) as f64 * mm_per_px;
-            let text = if show_unit { format!("{mm:.1} mm") } else { format!("{mm:.1}") };
-            let at = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0) + vec2(8.0, -8.0);
-            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), ruler);
-            let bg = egui::Rect::from_min_size(at - vec2(0.0, galley.size().y), galley.size()).expand(3.0);
-            painter.rect_filled(bg, 3.0, Color32::from_black_alpha(170));
-            painter.galley(bg.min + vec2(3.0, 3.0), galley, ruler);
-        }
+        let marks: Vec<Mark> = self.viewer.marks.iter().cloned().chain(preview_mark).collect();
+        let measures: Vec<[egui::Pos2; 2]> = self.viewer.measures.iter().copied().chain(measuring).collect();
+        painter.extend(annotation_shapes(ui.ctx(), st, &marks, &measures, mm_per_px, &to_screen, 1.0));
+        self.viewer.last_scale = scale;
 
         // Magnifier: a square lens under the pointer showing the image enlarged.
         if tool == Tool::Magnifier {
