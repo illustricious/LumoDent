@@ -100,28 +100,40 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 | DataAccessor | Database lokal | 34 (semua: Patient, Recent, Study, Report, Analysis, Create/CheckMainDB di `patients.rs`; Product, User, CloudUser, Create/CheckUserDB di `users.rs`) | 34 |
 | ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 10 algoritma dipetakan dari biner, lihat bagian ImageProcessing) | 17 |
 | DicomProcessor | DICOM | 6 (semua di `src/dicom.rs`: IsDicom → `is_dicom`, LoadFile/GetDicomImage → `parse`, SaveDicomFile → `write`, GetUid → `uid(UidKind)`, GetCurrentDateTime → `current_datetime`, GetInternal/FullDatasetMap → `Dicom::elements`) | 6 |
-| CFinnoRay | Sensor akuisisi | 0 dari 18 metode publik (pemrosesan gambarnya sudah di `src/sensor.rs`, lihat bagian Sensor) | 18 |
+| CFinnoRay | Sensor akuisisi | 0 dari 18 metode publik, semuanya lewat SDK (semua bagian tanpa alat sudah di `src/sensor.rs`, lihat bagian Sensor) | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
 | **Jumlah** | | **57** | **81** |
 
 ## Sensor: pemetaan dari IOSensorAcquisition.dll
 
-CFinnoRay membungkus SDK detektor vendor. InitializeByPath (0x100088f0) memuat pustaka SDK lalu membuat instance dengan callback SDKCallbackHandler. Connect (0x100079b0) membuka koneksi dengan timeout 10000 ms, lalu JudgeSensorSize (0x10008bf0) membaca atribut 0x138f dan 0x1390 (lebar dan tinggi) dan mencocokkannya ke tabel ukuran sensor. WaitForImage (0x10009850) menunggu dua event Windows tanpa batas waktu; -1 berarti error detektor, -2 berarti dihentikan pengguna. Bagian ini butuh SDK atau protokol USB vendor sehingga belum ditulis ulang.
+CFinnoRay membungkus SDK detektor vendor lewat USB. Bagian yang berbicara ke alat sudah dipetakan, tapi belum ditulis ulang karena butuh SDK atau protokol USB-nya dan sensor fisik untuk dites:
 
-AcqImageEx (0x10006c30) berurutan: baca kalibrasi gain (GetAndCaliFile_Gain) dan info bad pixel, set delay, mode trigger dan ambang trigger dari parameter, tunggu gambar, lalu pasca-proses. Pasca-proses yang sudah ada di Rust:
+- InitializeByPath (0x100088f0) memuat pustaka SDK dan membuat instance dengan callback SDKCallbackHandler.
+- Connect (0x100079b0) membuka koneksi dengan timeout 10000 ms, lalu JudgeSensorSize (0x10008bf0) membaca atribut 0x138f dan 0x1390 (lebar, tinggi).
+- GetDectectorState membaca atribut 0x138a. SetTriggerMode menulis atribut 0x9ca dan hanya menerima mode 6 atau 7.
+- WaitForImage (0x10009850) menunggu dua event Windows tanpa batas waktu: -1 berarti error detektor, -2 berarti dihentikan.
 
-| Asli | Algoritma | Rust |
+Seri sensor (tabel di 0x10004f00), sekarang `sensor::MODELS`:
+
+| Kode | Seri | Lebar × tinggi | Chamfer pojok |
+|---:|---|---|---:|
+| 1000 | NanoPix 1 | 1000 × 1500 | 211 |
+| 1500 | NanoPix 1.5 | 1200 × 1650 | 251 |
+| 2000 | NanoPix 2 | 1300 × 1800 | 281 |
+
+Semua yang tidak butuh alat sudah ada di `src/sensor.rs`:
+
+| Asli | Isi | Rust |
 |---|---|---|
-| CalcGainMat 0x10007740 | gain = rata-rata flat field / piksel, piksel < 0.001 dianggap 0.001 | `gain_map` |
-| DoGainCorrection 0x10007d00 → 0x100255c0 | satu kalibrasi: kalikan. Empat kalibrasi: ambil rata-rata 5000 piksel paling terang dari histogram, pilih kalibrasi dengan level dosis terdekat (selisih kuadrat terkecil), kalikan | `bright_level`, `gain_correct` |
-| Mask di AcqImageEx | histogram bagian dalam; batas atas tempat >1000 piksel di atasnya (minimal 20001), batas bawah tempat >1000 piksel di bawahnya (maksimal 199); di luar rentang ditandai | `defect_mask` |
-| DoFixBadPixel 0x10007c60 | memanggil ImgFix(…, 1, 6, 200) di pustaka koreksi terpisah, belum dipetakan | `fix_pixels` (pengganti sendiri: rata-rata tetangga 3×3 yang sehat) |
-
-Lebar tepi pada mask berasal dari tabel ukuran sensor (FUN_10008390) dan kondisinya di hasil dekompilasi rumit; `defect_mask` memakai tepi persegi sebagai pendekatan.
-
-DicomProcessor (didekompilasi dengan Ghidra) adalah pembungkus DCMTK. IsDicom membaca 4 byte di offset 128 dan membandingkan dengan "DICM". GetUid memanggil `dcmGenerateUniqueIdentifier` dengan root OFFIS `1.2.276.0.7230010.3.1.{2,3,4}` untuk study/series/instance. LumoDent tidak memakai root milik OFFIS dan memakai bentuk `2.25.<angka>` yang tidak butuh registrasi. GetCurrentDateTime memanggil `DcmDateTime::getCurrentDateTime` dengan detik dan pecahan, hasilnya `YYYYMMDDHHMMSS.FFFFFF`. GetLocaleEncoding (pemilihan code page CP1252/UTF-8/GB18030 dan lain-lain) tidak diperlukan karena LumoDent menulis teks UTF-8 langsung. InsertElement belum punya padanan publik; elemen tambahan saat menulis ditentukan di dalam `write`.
-
-DataAccessor sudah lengkap. Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
+| GetAndCaliFile_Gain 0x10007d30 | cari file `*.gn` di `<folder sensor>/Correct/Default`; header 0x410 byte; berisi 4 flat field 16-bit jika ukuran file > w×h×4, selain itu 1 | `find_calibration_file`, `parse_gain_file`, `load_calibration` |
+| ReadCaliFile_Gain 0x10008ce0 | level dosis = piksel pertama flat field, lalu CalcGainMat | `Gain::level` |
+| CalcGainMat 0x10007740 | gain = rata-rata / piksel, minimal 0.001 | `gain_map` |
+| DoGainCorrection 0x10007d00 → 0x100255c0 | 1 kalibrasi: kalikan. 4 kalibrasi: rata-rata 5000 piksel terterang, pilih level terdekat | `bright_level`, `gain_correct` |
+| GetBadPixelInfo 0x10008150 | file `*.dft`, header 0x410, w×h byte, bukan nol = rusak | `parse_defect_file` |
+| ImgFix 0x10021220 (r=1, mode 6, 200 putaran) | tiap putaran: piksel rusak yang punya tetangga 4-arah sehat diganti rata-rata piksel sehat di jendela 3×3; yang sudah diperbaiki dianggap sehat di putaran berikutnya | `fix_defects` (sama persis) |
+| Mask histogram di AcqImageEx | dihitung di bawah dua chamfer atas, lalu dibuang (tidak dipakai aslinya) | `exposure_mask`, untuk diagnosa |
+| Kode error AcqImageEx | 0 sampai -10 | `acquisition_error` |
+| Pasca-proses AcqImageEx | gain lalu perbaikan piksel | `post_process`, `parse_raw_frame` |
 
 ## Antarmuka lintas platform
 
