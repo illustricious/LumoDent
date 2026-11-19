@@ -316,7 +316,7 @@ pub fn page_text(draft: &Draft, clinic: &Clinic, now: &str) -> PageText {
         .map(|p| {
             let d = &p.details;
             (
-                format!("Patient: {} {}", d.last_name, d.first_name),
+                format!("Patient: {}", d.full_name()),
                 format!("Chart No.: {}     Gender: {}     Date of Birth: {}", p.id, d.sex, d.birthdate),
             )
         })

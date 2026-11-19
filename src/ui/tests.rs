@@ -122,7 +122,7 @@ fn patient_create_search_edit_delete() {
     click(&mut h, "Search");
     assert_eq!(h.state().patients.rows.len(), 1);
 
-    click(&mut h, "P-01 Wijaya Sari");
+    click(&mut h, "P-01 Sari Wijaya");
     click(&mut h, "Edit Patient");
     type_into(&mut h, "Phone", "0812");
     click(&mut h, "Ok");
@@ -276,7 +276,7 @@ fn render_screens() {
         h.run();
         h.render().unwrap().save(out.join(name)).unwrap();
     };
-    click(&mut h, "P-0001 Wijaya Sari");
+    click(&mut h, "P-0001 Sari Wijaya");
     shot(&mut h, "1-patient.png");
     click(&mut h, "New Patient");
     shot(&mut h, "2-new-patient.png");
@@ -302,6 +302,13 @@ fn render_screens() {
     click(&mut h, "Patient");
     shot(&mut h, "8-light-patient.png");
     theme::set_light(&h.ctx, false);
+    i18n::set_indonesian(true);
+    shot(&mut h, "9-id-patient.png");
+    click(&mut h, "Penampil");
+    shot(&mut h, "10-id-viewer.png");
+    click(&mut h, "Laporan");
+    shot(&mut h, "11-id-report.png");
+    i18n::set_indonesian(false);
 }
 
 fn seed_demo(dir: &Path) {

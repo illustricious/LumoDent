@@ -303,7 +303,7 @@ mod tests {
         let start = pdf.windows(7).position(|w| w == b"stream\n").unwrap() + 7;
         let end = start + pdf[start..].windows(10).position(|w| w == b"\nendstream").unwrap();
         let content = String::from_utf8_lossy(&decompress_to_vec_zlib(&pdf[start..end]).unwrap()).into_owned();
-        assert!(content.contains("(Patient: Wijaya Sari \\(Bu\\)) Tj"));
+        assert!(content.contains("(Patient: Sari \\(Bu\\) Wijaya) Tj"));
         assert!(content.contains("(Klinik Gigi Sehat) Tj"));
         assert!(content.contains("(Report date: 2026-11-19 10:00) Tj"));
         assert!(content.contains("/Im2 Do"));

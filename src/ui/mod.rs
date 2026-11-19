@@ -2,6 +2,7 @@
 //! Linux and macOS. Screens follow the reference application: Patient,
 //! Acquisition (not yet available), Viewer and Report.
 
+pub mod i18n;
 pub mod icons;
 mod patient;
 mod report;
@@ -11,6 +12,7 @@ mod viewer;
 mod tests;
 
 use eframe::egui::{self, vec2, Align, Color32, Id, Layout, Margin, RichText, Ui};
+use i18n::t;
 use icons::Icon;
 use lumodent::patients::Patient;
 use lumodent::studies::{Report, Study};
@@ -56,13 +58,13 @@ impl Hooks {
         Self {
             pick_image: Box::new(|| {
                 rfd::FileDialog::new()
-                    .set_title("Import Image")
-                    .add_filter("Image Files (.jpg .jpeg .png .bmp .dcm)", &lumodent::workspace::IMPORT_EXTENSIONS)
+                    .set_title(t("Import Image"))
+                    .add_filter(t("Image Files (.jpg .jpeg .png .bmp .dcm)"), &lumodent::workspace::IMPORT_EXTENSIONS)
                     .pick_file()
             }),
             save_file: Box::new(|name, ext| {
                 rfd::FileDialog::new()
-                    .set_title("Save As")
+                    .set_title(t("Save As"))
                     .add_filter(ext.to_uppercase(), &[ext])
                     .set_file_name(name)
                     .save_file()
@@ -136,6 +138,14 @@ impl App {
         self.check(saved);
     }
 
+    /// Switches the interface language and remembers the choice.
+    pub fn set_language(&mut self, indonesian: bool) {
+        i18n::set_indonesian(indonesian);
+        let saved = std::fs::write(self.ws.data.join("language.txt"), if indonesian { "id" } else { "en" })
+            .map_err(|e| format!("Cannot save the language: {e}"));
+        self.check(saved);
+    }
+
     /// Shows an error from an operation in the notice dialog.
     pub fn check<T>(&mut self, result: Result<T, String>) -> Option<T> {
         match result {
@@ -177,7 +187,7 @@ impl App {
             }
             Screen::Viewer | Screen::Report => {
                 let Some(patient) = self.context_patient() else {
-                    self.notice = Some("Please select a patient.".into());
+                    self.notice = Some(t("Please select a patient.").into());
                     return;
                 };
                 let entered = if target == Screen::Viewer {
@@ -211,7 +221,7 @@ impl App {
         self.left_width = (ui.max_rect().width() * 0.17).clamp(200.0, 260.0);
         ui.painter().rect_filled(ui.max_rect(), 0.0, theme::back());
         egui::Panel::top("menu")
-            .frame(egui::Frame::new().fill(theme::edge()).inner_margin(Margin::symmetric(6, 2)))
+            .frame(egui::Frame::new().fill(theme::edge()).inner_margin(Margin { left: 6, right: 0, top: 0, bottom: 0 }))
             .show(ui, |ui| self.menu(ui));
         egui::Panel::top("header")
             .exact_size(112.0)
@@ -225,30 +235,125 @@ impl App {
         let ctx = ui.ctx().clone();
         self.patient_dialogs(&ctx);
         self.dialogs(&ctx);
+        resize_edges(&ctx);
     }
 
+    /// The top bar: menus, the window title and the window buttons, in one row
+    /// (the window has no system title bar). Empty space drags the window.
     fn menu(&mut self, ui: &mut Ui) {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Close").clicked() {
+        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+        let bar = ui.max_rect();
+        let drag = ui.interact(bar, Id::unique("title-drag"), egui::Sense::click_and_drag());
+        if drag.drag_started() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if drag.double_clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+        ui.horizontal(|ui| {
+            egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                if window_button(ui, WindowButton::Close, t("Close window")).clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
+                let (kind, tip) = if maximized { (WindowButton::Restore, t("Restore")) } else { (WindowButton::Maximize, t("Maximize")) };
+                if window_button(ui, kind, tip).clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                }
+                if window_button(ui, WindowButton::Minimize, t("Minimize")).clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                ui.painter().text(bar.center(), egui::Align2::CENTER_CENTER, APP_NAME, egui::FontId::proportional(13.0), theme::muted());
             });
-            ui.menu_button("Tools", |ui| {
-                ui.menu_button("Theme", |ui| {
-                    for (light, label) in [(false, "Dark"), (true, "Light")] {
-                        if ui.radio(theme::is_light() == light, label).clicked() {
-                            self.set_theme(ui.ctx(), light);
-                            ui.close();
-                        }
+        });
+    }
+
+    fn menus(&mut self, ui: &mut Ui) {
+        let has_patient = self.context_patient().is_some();
+        let has_image = self.viewer.image.is_some();
+        let in_viewer = self.screen == Screen::Viewer;
+        let in_report = self.screen == Screen::Report;
+        ui.menu_button(t("File"), |ui| {
+            if ui.button(t("New Patient")).clicked() {
+                self.navigate(Screen::Patient);
+                self.open_editor(false);
+            }
+            if ui.add_enabled(in_viewer, egui::Button::new(t("Import Image…"))).clicked() {
+                let r = self.import_image();
+                self.check(r);
+            }
+            ui.separator();
+            if ui.add_enabled(in_viewer && has_image, egui::Button::new(t("Export Image as PNG…"))).clicked() {
+                let r = self.export_image("png");
+                self.check(r);
+            }
+            if ui.add_enabled(in_viewer && has_image, egui::Button::new(t("Export Image as DICOM…"))).clicked() {
+                let r = self.export_image("dcm");
+                self.check(r);
+            }
+            if ui.add_enabled(in_report, egui::Button::new(t("Export Report as PDF…"))).clicked() {
+                let r = self.export_pdf();
+                self.check(r);
+            }
+            if ui.add_enabled(in_report, egui::Button::new(t("Print Report…"))).clicked() {
+                let r = self.print_report();
+                self.check(r);
+            }
+            ui.separator();
+            if ui.button(t("Exit")).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+        ui.menu_button(t("View"), |ui| {
+            for (label, screen) in [(t("Patient"), Screen::Patient), (t("Viewer"), Screen::Viewer), (t("Report"), Screen::Report)] {
+                let enabled = screen == Screen::Patient || has_patient;
+                if ui.add_enabled(enabled, egui::RadioButton::new(self.screen == screen, label)).clicked() {
+                    self.navigate(screen);
+                }
+            }
+            ui.separator();
+            let full = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+            if ui.add(egui::RadioButton::new(full, t("Full Screen"))).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+            }
+        });
+        ui.menu_button(t("Tools"), |ui| {
+            ui.menu_button(t("Theme"), |ui| {
+                for (light, label) in [(false, t("Dark")), (true, t("Light"))] {
+                    if ui.radio(theme::is_light() == light, label).clicked() {
+                        self.set_theme(ui.ctx(), light);
                     }
-                });
-            });
-            ui.menu_button("Help", |ui| {
-                if ui.button("About").clicked() {
-                    self.about = true;
                 }
             });
+            ui.menu_button(t("Language"), |ui| {
+                for (id, label) in [(false, "English"), (true, "Bahasa Indonesia")] {
+                    if ui.radio(i18n::is_indonesian() == id, label).clicked() {
+                        self.set_language(id);
+                    }
+                }
+            });
+            ui.separator();
+            if ui.button(t("Open Data Folder")).clicked() {
+                let dir = self.ws.data.clone();
+                let r = (self.hooks.open_file)(&dir);
+                self.check(r);
+            }
+            if ui.add_enabled(has_patient, egui::Button::new(t("Open Patient Image Folder"))).clicked() {
+                if let Some(p) = self.context_patient() {
+                    let dir = self.ws.image_dir(&p.id);
+                    let r = std::fs::create_dir_all(&dir).map_err(|e| e.to_string()).and_then(|_| (self.hooks.open_file)(&dir));
+                    self.check(r);
+                }
+            }
+        });
+        ui.menu_button(t("Help"), |ui| {
+            if ui.button(t("Keyboard Shortcuts")).clicked() {
+                self.notice = Some(if i18n::is_indonesian() { SHORTCUTS_ID } else { SHORTCUTS }.into());
+            }
+            if ui.button(t("About")).clicked() {
+                self.about = true;
+            }
         });
     }
 
@@ -260,10 +365,10 @@ impl App {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let tabs = [
-                        (Icon::Patient, "Patient", Some(Screen::Patient)),
-                        (Icon::Acquisition, "Acquisition", None),
-                        (Icon::Viewer, "Viewer", Some(Screen::Viewer)),
-                        (Icon::Report, "Report", Some(Screen::Report)),
+                        (Icon::Patient, t("Patient"), Some(Screen::Patient)),
+                        (Icon::Acquisition, t("Acquisition"), None),
+                        (Icon::Viewer, t("Viewer"), Some(Screen::Viewer)),
+                        (Icon::Report, t("Report"), Some(Screen::Report)),
                     ];
                     for (icon, label, target) in tabs {
                         let selected = target == Some(self.screen);
@@ -272,7 +377,7 @@ impl App {
                             match target {
                                 Some(screen) => self.navigate(screen),
                                 None => {
-                                    self.notice = Some("The Acquisition module is not available in LumoDent yet.".into())
+                                    self.notice = Some(t("The Acquisition module is not available in LumoDent yet.").into())
                                 }
                             }
                         }
@@ -283,8 +388,8 @@ impl App {
             ui.allocate_ui_with_layout(rest, Layout::right_to_left(Align::Center), |ui| {
                 let name = self
                     .context_patient()
-                    .map(|p| format!("{} {}", p.details.last_name, p.details.first_name))
-                    .unwrap_or_else(|| "Please select a patient.".into());
+                    .map(|p| p.details.full_name())
+                    .unwrap_or_else(|| t("Please select a patient.").into());
                 ui.label(RichText::new(name).size(16.0));
             });
         });
@@ -298,7 +403,7 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(text);
                 ui.add_space(8.0);
-                ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.button("OK").clicked()).inner
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.button(t("OK")).clicked()).inner
             });
             if modal.inner || modal.should_close() {
                 self.notice = None;
@@ -308,13 +413,13 @@ impl App {
             let text = confirm.text.clone();
             let modal = egui::Modal::new(Id::unique("confirm")).show(ctx, |ui| {
                 ui.set_max_width(420.0);
-                ui.heading("QUESTION");
+                ui.heading(t("QUESTION"));
                 ui.add_space(4.0);
                 ui.label(text);
                 ui.add_space(8.0);
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    let no = ui.button("No").clicked();
-                    let yes = ui.button("Yes").clicked();
+                    let no = ui.button(t("No")).clicked();
+                    let yes = ui.button(t("Yes")).clicked();
                     (yes, no)
                 })
                 .inner
@@ -333,10 +438,10 @@ impl App {
                 icons::logo(ui, vec2(320.0, 100.0));
                 ui.vertical_centered(|ui| {
                     ui.label(format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION")));
-                    ui.label("Intraoral X-ray workstation");
-                    ui.label(format!("Developer: {DEVELOPER}"));
+                    ui.label(t("Intraoral X-ray workstation"));
+                    ui.label(format!("{}: {DEVELOPER}", if i18n::is_indonesian() { "Pengembang" } else { "Developer" }));
                     ui.add_space(8.0);
-                    ui.button("OK").clicked()
+                    ui.button(t("OK")).clicked()
                 })
                 .inner
             });
@@ -420,3 +525,100 @@ fn theme_path(data: &Path) -> PathBuf {
 pub fn saved_light(data: &Path) -> bool {
     std::fs::read_to_string(theme_path(data)).is_ok_and(|s| s.trim() == "light")
 }
+
+/// Column titles laid out exactly like the cells of `list_row` below them.
+pub fn list_header(ui: &mut Ui, columns: &[(f32, &str)]) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), egui::Sense::hover());
+    let x = rect.left() + 6.0;
+    let text_width = rect.right() - x;
+    let mut offset = 0.0;
+    for (fraction, title) in columns {
+        let at = egui::pos2(x + offset, rect.center().y);
+        ui.painter().text(at, egui::Align2::LEFT_CENTER, *title, egui::FontId::proportional(14.0), theme::muted());
+        offset += text_width * fraction;
+    }
+}
+
+const SHORTCUTS: &str = "Viewer shortcuts\n\n+ / -   Zoom in / out\nR / L   Rotate right / left\nH / V   Flip horizontal / vertical\nI   Invert\nF or 0   Fit\nUp / Down   Previous / next image\n\nDouble-click the title bar to maximize or restore.";
+
+#[derive(Clone, Copy, PartialEq)]
+enum WindowButton {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+/// A caption button drawn like the system ones; Close turns red on hover.
+fn window_button(ui: &mut Ui, kind: WindowButton, tip: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(46.0, 30.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
+    let hovered = response.hovered();
+    if hovered {
+        let fill = if kind == WindowButton::Close { Color32::from_rgb(0xc4, 0x2b, 0x1c) } else { theme::button_hover() };
+        ui.painter().rect_filled(rect, 0.0, fill);
+    }
+    let color = if hovered && kind == WindowButton::Close { Color32::WHITE } else { theme::text() };
+    let s = egui::Stroke::new(1.0, color);
+    let c = rect.center();
+    let p = ui.painter();
+    match kind {
+        WindowButton::Minimize => {
+            p.line_segment([c + vec2(-5.0, 0.0), c + vec2(5.0, 0.0)], s);
+        }
+        WindowButton::Maximize => {
+            p.rect_stroke(egui::Rect::from_center_size(c, vec2(10.0, 10.0)), 0.0, s, egui::StrokeKind::Middle);
+        }
+        WindowButton::Restore => {
+            p.rect_stroke(egui::Rect::from_center_size(c + vec2(-1.5, 1.5), vec2(8.0, 8.0)), 0.0, s, egui::StrokeKind::Middle);
+            p.line_segment([c + vec2(-3.5, -3.5), c + vec2(4.5, -3.5)], s);
+            p.line_segment([c + vec2(4.5, -3.5), c + vec2(4.5, 4.5)], s);
+        }
+        WindowButton::Close => {
+            p.line_segment([c + vec2(-5.0, -5.0), c + vec2(5.0, 5.0)], s);
+            p.line_segment([c + vec2(5.0, -5.0), c + vec2(-5.0, 5.0)], s);
+        }
+    }
+    response.on_hover_text(tip)
+}
+
+/// Lets the borderless window be resized from its edges and corners.
+fn resize_edges(ctx: &egui::Context) {
+    use egui::{CursorIcon, ResizeDirection as D};
+    let (maximized, fullscreen) = ctx.input(|i| (i.viewport().maximized.unwrap_or(false), i.viewport().fullscreen.unwrap_or(false)));
+    if maximized || fullscreen {
+        return;
+    }
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+    let r = ctx.content_rect();
+    let m = 5.0;
+    let (l, rt, t, b) = (pos.x - r.left() < m, r.right() - pos.x < m, pos.y - r.top() < m, r.bottom() - pos.y < m);
+    let dir = match (l, rt, t, b) {
+        (true, _, true, _) => D::NorthWest,
+        (_, true, true, _) => D::NorthEast,
+        (true, _, _, true) => D::SouthWest,
+        (_, true, _, true) => D::SouthEast,
+        (true, ..) => D::West,
+        (_, true, ..) => D::East,
+        (_, _, true, _) => D::North,
+        (_, _, _, true) => D::South,
+        _ => return,
+    };
+    let cursor = match dir {
+        D::NorthWest | D::SouthEast => CursorIcon::ResizeNwSe,
+        D::NorthEast | D::SouthWest => CursorIcon::ResizeNeSw,
+        D::West | D::East => CursorIcon::ResizeHorizontal,
+        D::North | D::South => CursorIcon::ResizeVertical,
+    };
+    ctx.set_cursor_icon(cursor);
+    if ctx.input(|i| i.pointer.primary_pressed()) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+    }
+}
+
+/// Whether the saved interface language is Indonesian (English is the default).
+pub fn saved_indonesian(data: &Path) -> bool {
+    std::fs::read_to_string(data.join("language.txt")).is_ok_and(|s| s.trim() == "id")
+}
+
+const SHORTCUTS_ID: &str = "Pintasan Penampil\n\n+ / -   Perbesar / perkecil\nR / L   Putar kanan / kiri\nH / V   Balik horizontal / vertikal\nI   Negatif\nF atau 0   Pas layar\nAtas / Bawah   Gambar sebelumnya / berikutnya\n\nKlik ganda title bar untuk membesarkan atau memulihkan.";

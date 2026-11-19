@@ -2,7 +2,7 @@
 //! with drag-to-pan and wheel zoom, and brightness/contrast.
 
 use super::icons::{self, Icon, Layout as IconLayout};
-use super::{list_row, section, theme, App, Pending};
+use super::{list_row, section, t, theme, App, Pending};
 use eframe::egui::{self, pos2, vec2, Align, Color32, ColorImage, Layout, Rect, TextureHandle, TextureOptions, Ui};
 use lumodent::image::{levels, Image, Viewport};
 use lumodent::patients::Patient;
@@ -97,7 +97,7 @@ impl App {
             self.open_study(index.unwrap());
         } else if index.is_none() {
             self.viewer.current = None;
-            self.viewer.show(None, "No images for this patient. Use Import Image to add one.");
+            self.viewer.show(None, t("No images for this patient. Use Import Image to add one."));
         }
         Ok(())
     }
@@ -120,7 +120,7 @@ impl App {
         if study.image_type == "dcm" {
             let other = std::fs::read(&path).ok().and_then(|b| lumodent::dicom::parse(&b).ok()).map(|d| d.tags.patient_id);
             if let Some(id) = other.filter(|id| !id.is_empty() && *id != patient.id) {
-                self.notice = Some(format!("The DICOM file belongs to patient ID {id}, not {}. It was imported for {} anyway.", patient.id, patient.id));
+                self.notice = Some(super::i18n::pick(format!("The DICOM file belongs to patient ID {id}, not {}. It was imported for {} anyway.", patient.id, patient.id), format!("Berkas DICOM ini milik pasien dengan ID {id}, bukan {}. Gambar tetap diimpor untuk {}.", patient.id, patient.id)));
             }
         }
         Ok(())
@@ -147,7 +147,7 @@ impl App {
         } else {
             image.save_png(&path)?;
         }
-        self.notice = Some(format!("Image saved to {}.", path.display()));
+        self.notice = Some(super::i18n::pick(format!("Image saved to {}.", path.display()), format!("Gambar disimpan ke {}.", path.display())));
         Ok(())
     }
 
@@ -178,7 +178,7 @@ impl App {
     pub fn send_to_report(&mut self) {
         let Some(patient) = self.viewer.patient.clone() else { return };
         let Some(image) = self.viewer.snapshot() else {
-            self.notice = Some("Error with send image to report, please retry.".into());
+            self.notice = Some(t("Error with send image to report, please retry.").into());
             return;
         };
         if self.report.draft.patient.as_ref().map(|p| p.pk) != Some(patient.pk) {
@@ -187,7 +187,8 @@ impl App {
         self.report.draft.images.push(image);
         self.report.draft.dirty = true;
         self.report.changed();
-        self.notice = Some(format!("Image sent to report ({} in the current report).", self.report.draft.images.len()));
+        let n = self.report.draft.images.len();
+        self.notice = Some(super::i18n::pick(format!("Image sent to report ({n} in the current report)."), format!("Gambar dikirim ke laporan ({n} di laporan ini).")));
     }
 
     fn thumb(&mut self, ctx: &egui::Context, index: usize) -> Option<egui::TextureId> {
@@ -211,13 +212,13 @@ impl App {
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.set_min_height(ui.available_height());
-                    section(ui, "IMAGES");
+                    section(ui, t("IMAGES"));
                     let width = ui.available_width();
                     let mut import = false;
                     let mut delete = false;
                     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                        delete = icons::button(ui, Some(Icon::Delete), "Delete Image", vec2(width, 32.0), IconLayout::Inline, self.viewer.current.is_some(), false).clicked();
-                        import = icons::button(ui, Some(Icon::Import), "Import Image", vec2(width, 32.0), IconLayout::Inline, true, false).clicked();
+                        delete = icons::button(ui, Some(Icon::Delete), t("Delete Image"), vec2(width, 32.0), IconLayout::Inline, self.viewer.current.is_some(), false).clicked();
+                        import = icons::button(ui, Some(Icon::Import), t("Import Image"), vec2(width, 32.0), IconLayout::Inline, true, false).clicked();
                         ui.add_space(4.0);
                         ui.with_layout(Layout::top_down(Align::Min), |ui| {
                             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -244,7 +245,7 @@ impl App {
                     }
                     if delete {
                         if let Some(study) = self.viewer.current.and_then(|i| self.viewer.studies.get(i)).cloned() {
-                            self.ask("The selected image will be deleted, are you sure to do so?", Pending::DeleteImage(study));
+                            self.ask(t("The selected image will be deleted, are you sure to do so?"), Pending::DeleteImage(study));
                         }
                     }
                 });
@@ -257,28 +258,28 @@ impl App {
                 ui.horizontal(|ui| {
                     let size = vec2(82.0, 58.0);
                     let tools: [(Icon, &str, fn(&mut Image)); 5] = [
-                        (Icon::RotateLeft, "Rotate Left", Image::rotate_counter_clockwise),
-                        (Icon::Rotate, "Rotate Right", Image::rotate_clockwise),
-                        (Icon::FlipH, "Flip Horizontal", Image::flip_horizontal),
-                        (Icon::FlipV, "Flip Vertical", Image::flip_vertical),
-                        (Icon::Invert, "Invert", Image::invert),
+                        (Icon::RotateLeft, t("Rotate Left"), Image::rotate_counter_clockwise),
+                        (Icon::Rotate, t("Rotate Right"), Image::rotate_clockwise),
+                        (Icon::FlipH, t("Flip Horizontal"), Image::flip_horizontal),
+                        (Icon::FlipV, t("Flip Vertical"), Image::flip_vertical),
+                        (Icon::Invert, t("Invert"), Image::invert),
                     ];
                     for (icon, label, f) in tools {
                         if icons::button(ui, Some(icon), label, size, IconLayout::Stacked, has_image, false).clicked() {
                             self.viewer.edit(f);
                         }
                     }
-                    if icons::button(ui, Some(Icon::Fit), "Fit", size, IconLayout::Stacked, has_image, false).clicked() {
+                    if icons::button(ui, Some(Icon::Fit), t("Fit"), size, IconLayout::Stacked, has_image, false).clicked() {
                         self.viewer.viewport = Viewport::default();
                     }
-                    if icons::button(ui, Some(Icon::Send), "Send to Report", size, IconLayout::Stacked, has_image, false).clicked() {
+                    if icons::button(ui, Some(Icon::Send), t("Send to Report"), size, IconLayout::Stacked, has_image, false).clicked() {
                         self.send_to_report();
                     }
-                    if icons::button(ui, Some(Icon::ExportImage), "Export Image", size, IconLayout::Stacked, has_image, false).clicked() {
+                    if icons::button(ui, Some(Icon::ExportImage), t("Export Image"), size, IconLayout::Stacked, has_image, false).clicked() {
                         let saved = self.export_image("png");
                         self.check(saved);
                     }
-                    if icons::button(ui, Some(Icon::ExportImage), "Export DICOM", size, IconLayout::Stacked, has_image, false).clicked() {
+                    if icons::button(ui, Some(Icon::ExportImage), t("Export DICOM"), size, IconLayout::Stacked, has_image, false).clicked() {
                         let saved = self.export_image("dcm");
                         self.check(saved);
                     }
@@ -293,21 +294,21 @@ impl App {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         let center = canvas.size() / 2.0;
-                        for (icon, label, factor) in [(Icon::ZoomOut, "Zoom Out", 0.8), (Icon::ZoomIn, "Zoom In", 1.25)] {
+                        for (icon, label, factor) in [(Icon::ZoomOut, t("Zoom Out"), 0.8), (Icon::ZoomIn, t("Zoom In"), 1.25)] {
                             if icons::button(ui, Some(icon), label, vec2(110.0, 30.0), IconLayout::Inline, has_image, false).clicked() {
                                 self.zoom(factor, canvas, center.to_pos2());
                             }
                         }
                         ui.add_space(16.0);
                         let mut changed = false;
-                        let caption = ui.label("Brightness");
+                        let caption = ui.label(t("Brightness"));
                         changed |= ui.add(egui::Slider::new(&mut self.viewer.brightness, -100..=100).show_value(false)).labelled_by(caption.id).changed();
                         ui.add_space(12.0);
-                        let caption = ui.label("Contrast");
+                        let caption = ui.label(t("Contrast"));
                         changed |= ui.add(egui::Slider::new(&mut self.viewer.contrast, -100..=100).show_value(false)).labelled_by(caption.id).changed();
                         ui.add_space(12.0);
                         let tone = self.viewer.brightness != 0 || self.viewer.contrast != 0;
-                        if icons::button(ui, Some(Icon::Reset), "Reset", vec2(96.0, 30.0), IconLayout::Inline, has_image && tone, false).clicked() {
+                        if icons::button(ui, Some(Icon::Reset), t("Reset"), vec2(96.0, 30.0), IconLayout::Inline, has_image && tone, false).clicked() {
                             (self.viewer.brightness, self.viewer.contrast) = (0, 0);
                             changed = true;
                         }
@@ -331,7 +332,7 @@ impl App {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme::canvas());
         let Some(image) = &self.viewer.image else {
-            let text = if self.viewer.message.is_empty() { "No image selected." } else { &self.viewer.message };
+            let text = if self.viewer.message.is_empty() { t("No image selected.") } else { &self.viewer.message };
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(15.0), theme::muted());
             return rect;
         };

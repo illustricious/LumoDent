@@ -67,6 +67,9 @@ fn main() -> eframe::Result {
             .with_app_id("lumodent")
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([1024.0, 700.0])
+            // LumoDent draws its own title bar with the menus (src/ui/mod.rs).
+            .with_decorations(false)
+            .with_resizable(true)
             .with_icon(window_icon()),
         ..Default::default()
     };
@@ -77,6 +80,7 @@ fn main() -> eframe::Result {
             let workspace = workspace.map_err(|e| format!("Cannot open the data folder: {e}"));
             let light = workspace.as_ref().is_ok_and(|w| ui::saved_light(&w.data));
             ui::theme::set_light(&cc.egui_ctx, light);
+            ui::i18n::set_indonesian(workspace.as_ref().is_ok_and(|w| ui::saved_indonesian(&w.data)));
             let workspace = workspace?;
             Ok(Box::new(ui::App::new(workspace, ui::Hooks::native())))
         }),

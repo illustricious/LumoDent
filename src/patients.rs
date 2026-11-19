@@ -49,6 +49,11 @@ pub struct PatientDetails {
 }
 
 impl PatientDetails {
+    /// First name first, as shown everywhere in the interface.
+    pub fn full_name(&self) -> String {
+        format!("{} {}", self.first_name.trim(), self.last_name.trim()).trim().to_string()
+    }
+
     fn values(&self) -> [&str; 10] {
         [
             &self.last_name,

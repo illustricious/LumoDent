@@ -2,14 +2,14 @@
 //! the summary card and the New/Edit Patient form.
 
 use super::icons::{self, Icon, Layout as IconLayout};
-use super::{list_row, section, theme, App, Pending};
+use super::{list_row, section, t, theme, App, Pending};
 use eframe::egui::{self, vec2, Align, Id, Layout, RichText, Ui};
 use lumodent::patients::{Patient, PatientDetails};
 
 pub const FIELDS: [&str; 11] = [
     "Chart No.",
-    "Last Name",
     "First Name",
+    "Last Name",
     "Gender",
     "Date of Birth",
     "Doctor",
@@ -66,7 +66,7 @@ impl PatientState {
 fn values(p: &Patient) -> [String; 11] {
     let d = &p.details;
     [
-        &p.id, &d.last_name, &d.first_name, &d.sex, &d.birthdate, &d.doctor, &d.social_id, &d.phone, &d.email,
+        &p.id, &d.first_name, &d.last_name, &d.sex, &d.birthdate, &d.doctor, &d.social_id, &d.phone, &d.email,
         &d.zipcode, &d.address,
     ]
     .map(|s| s.clone())
@@ -107,12 +107,12 @@ impl App {
         let Some(editor) = &self.patients.editor else { return Ok(()) };
         let f = editor.fields.clone().map(|s| s.trim().to_string());
         if f[0].is_empty() {
-            return Err("Patient's Chart Number can't be empty, please input one.".into());
+            return Err(t("Patient's Chart Number can't be empty, please input one.").into());
         }
         if f[1].is_empty() && f[2].is_empty() {
-            return Err("Patient's name can't be empty, please input one.".into());
+            return Err(t("Patient's name can't be empty, please input one.").into());
         }
-        let [id, last_name, first_name, sex, birthdate, doctor, social_id, phone, email, zipcode, address] = f;
+        let [id, first_name, last_name, sex, birthdate, doctor, social_id, phone, email, zipcode, address] = f;
         let details = PatientDetails { last_name, first_name, sex, birthdate, doctor, social_id, phone, email, zipcode, address };
         let pk = match editor.pk {
             Some(pk) => {
@@ -158,27 +158,27 @@ impl App {
             .show(ui, |ui| {
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    section(ui, "SEARCH");
+                    section(ui, t("SEARCH"));
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut self.patients.query)
                             .hint_text("Chart No., name or phone")
                             .desired_width(f32::INFINITY),
                     );
-                    field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search patients"));
+                    field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, t("Search patients")));
                     let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let width = ui.available_width();
-                    if icons::button(ui, Some(Icon::Search), "Search", vec2(width, 32.0), IconLayout::Inline, true, false).clicked() || enter {
+                    if icons::button(ui, Some(Icon::Search), t("Search"), vec2(width, 32.0), IconLayout::Inline, true, false).clicked() || enter {
                         self.search(super::patient::Scope::Search);
                     }
                 });
                 ui.add_space(8.0);
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    section(ui, "QUICK SEARCH");
+                    section(ui, t("QUICK SEARCH"));
                     let width = ui.available_width();
                     for (icon, label, scope) in [
-                        (Icon::Clock, "Recently Acquired", Scope::RecentlyAcquired),
-                        (Icon::Print, "Recently Printed", Scope::RecentlyPrinted),
+                        (Icon::Clock, t("Recently Acquired"), Scope::RecentlyAcquired),
+                        (Icon::Print, t("Recently Printed"), Scope::RecentlyPrinted),
                     ] {
                         let active = self.patients.scope == scope;
                         if icons::button(ui, Some(icon), label, vec2(width, 32.0), IconLayout::Inline, true, active).clicked() {
@@ -194,18 +194,18 @@ impl App {
                 let selected = self.patients.selected_patient().is_some();
                 ui.horizontal(|ui| {
                     let size = vec2(104.0, 58.0);
-                    if icons::button(ui, Some(Icon::AddPatient), "New Patient", size, IconLayout::Stacked, true, false).clicked() {
+                    if icons::button(ui, Some(Icon::AddPatient), t("New Patient"), size, IconLayout::Stacked, true, false).clicked() {
                         self.open_editor(false);
                     }
-                    if icons::button(ui, Some(Icon::Edit), "Edit Patient", size, IconLayout::Stacked, selected, false).clicked() {
+                    if icons::button(ui, Some(Icon::Edit), t("Edit Patient"), size, IconLayout::Stacked, selected, false).clicked() {
                         self.open_editor(true);
                     }
-                    if icons::button(ui, Some(Icon::Delete), "Delete Patient", size, IconLayout::Stacked, selected, false).clicked() {
+                    if icons::button(ui, Some(Icon::Delete), t("Delete Patient"), size, IconLayout::Stacked, selected, false).clicked() {
                         if let Some(p) = self.patients.selected_patient().cloned() {
-                            self.ask("All of the patient's data will be deleted, are you sure to do so?", Pending::DeletePatient(p));
+                            self.ask(t("All of the patient's data will be deleted, are you sure to do so?"), Pending::DeletePatient(p));
                         }
                     }
-                    if icons::button(ui, Some(Icon::Clear), "Clear List", size, IconLayout::Stacked, !self.patients.rows.is_empty(), false).clicked() {
+                    if icons::button(ui, Some(Icon::Clear), t("Clear List"), size, IconLayout::Stacked, !self.patients.rows.is_empty(), false).clicked() {
                         self.patients.rows.clear();
                         self.patients.selected = None;
                     }
@@ -214,13 +214,13 @@ impl App {
                         // Right-to-left: the combo box first, then its caption on its left.
                         let combo = egui::ComboBox::from_id_salt("date-filter")
                             .width(170.0)
-                            .selected_text(DATES[self.patients.date])
+                            .selected_text(t(DATES[self.patients.date]))
                             .show_ui(ui, |ui| {
                                 for (i, name) in DATES.iter().enumerate() {
-                                    ui.selectable_value(&mut self.patients.date, i, *name);
+                                    ui.selectable_value(&mut self.patients.date, i, t(name));
                                 }
                             });
-                        let caption = ui.label("Date");
+                        let caption = ui.label(t("Date"));
                         combo.response.labelled_by(caption.id);
                         if self.patients.date != before {
                             let scope = self.patients.scope;
@@ -247,10 +247,10 @@ impl App {
                 egui::Grid::new("summary").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
                     let d = patient.as_ref().map(|p| &p.details);
                     let rows = [
-                        ("Chart No.", patient.as_ref().map(|p| p.id.clone())),
-                        ("Name", d.map(|d| format!("{} {}", d.last_name, d.first_name))),
-                        ("Gender", d.map(|d| d.sex.clone())),
-                        ("Date of Birth", d.map(|d| d.birthdate.clone())),
+                        (t("Chart No."), patient.as_ref().map(|p| p.id.clone())),
+                        (t("Name"), d.map(|d| d.full_name())),
+                        (t("Gender"), d.map(|d| d.sex.clone())),
+                        (t("Date of Birth"), d.map(|d| d.birthdate.clone())),
                     ];
                     for (label, value) in rows {
                         ui.label(RichText::new(label).color(theme::muted()));
@@ -259,7 +259,7 @@ impl App {
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                    if icons::button(ui, Some(Icon::Detail), "Show Detail", vec2(150.0, 32.0), IconLayout::Inline, patient.is_some(), false).clicked() {
+                    if icons::button(ui, Some(Icon::Detail), t("Show Detail"), vec2(150.0, 32.0), IconLayout::Inline, patient.is_some(), false).clicked() {
                         self.patients.detail = true;
                     }
                 });
@@ -271,17 +271,12 @@ impl App {
         theme::panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_min_height(ui.available_height());
-            section(ui, "PATIENT SEARCH RESULT");
+            section(ui, t("PATIENT SEARCH RESULT"));
             let columns = [0.2, 0.32, 0.22, 0.26];
-            let width = ui.available_width();
-            ui.horizontal(|ui| {
-                for (fraction, title) in columns.iter().zip(["Chart No.", "Name", "Date of Birth", "Phone"]) {
-                    ui.add_sized([width * fraction - 8.0, 20.0], egui::Label::new(RichText::new(title).color(theme::muted())));
-                }
-            });
+            super::list_header(ui, &columns.iter().copied().zip([t("Chart No."), t("Name"), t("Date of Birth"), t("Phone")]).collect::<Vec<_>>());
             if self.patients.rows.is_empty() {
                 ui.add_space(12.0);
-                ui.label(RichText::new("No patients to show. Use New Patient to add one.").color(theme::muted()));
+                ui.label(RichText::new(t("No patients to show. Use New Patient to add one.")).color(theme::muted()));
                 return;
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -289,7 +284,7 @@ impl App {
                 let mut opened = None;
                 for (i, p) in self.patients.rows.iter().enumerate() {
                     let d = &p.details;
-                    let name = format!("{} {}", d.last_name, d.first_name);
+                    let name = d.full_name();
                     let label = format!("{} {}", p.id, name);
                     let cells = [(columns[0], p.id.as_str()), (columns[1], name.as_str()), (columns[2], d.birthdate.as_str()), (columns[3], d.phone.as_str())];
                     let selected = self.patients.selected == Some(p.pk);
@@ -316,11 +311,11 @@ impl App {
             let editing = editor.pk.is_some();
             let modal = egui::Modal::new(Id::unique("patient-editor")).show(ctx, |ui| {
                 ui.set_width(560.0);
-                ui.heading(if editing { "EDIT PATIENT" } else { "NEW PATIENT" });
+                ui.heading(if editing { t("EDIT PATIENT") } else { t("NEW PATIENT") });
                 ui.add_space(6.0);
                 egui::Grid::new("patient-fields").num_columns(4).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
                     for (i, label) in FIELDS.iter().enumerate() {
-                        let caption = ui.label(*label);
+                        let caption = ui.label(t(label));
                         // Fixed size: a Grid measures columns on its first pass.
                         let enabled = !(editing && i == 0);
                         let field = ui.add_enabled_ui(enabled, |ui| ui.add_sized([180.0, 26.0], egui::TextEdit::singleline(&mut editor.fields[i]))).inner;
@@ -332,8 +327,8 @@ impl App {
                 });
                 ui.add_space(10.0);
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    let cancel = ui.add_sized([90.0, 30.0], egui::Button::new("Cancel")).clicked();
-                    let ok = ui.add_sized([90.0, 30.0], egui::Button::new("Ok")).clicked();
+                    let cancel = ui.add_sized([90.0, 30.0], egui::Button::new(t("Cancel"))).clicked();
+                    let ok = ui.add_sized([90.0, 30.0], egui::Button::new(t("Ok"))).clicked();
                     (ok, cancel)
                 })
                 .inner
@@ -350,19 +345,19 @@ impl App {
             let patient = self.patients.selected_patient().cloned();
             let modal = egui::Modal::new(Id::unique("patient-detail")).show(ctx, |ui| {
                 ui.set_width(420.0);
-                ui.heading("PATIENT DETAIL INFORMATION");
+                ui.heading(t("PATIENT DETAIL INFORMATION"));
                 ui.add_space(6.0);
                 if let Some(p) = &patient {
                     egui::Grid::new("detail").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
                         for (label, value) in FIELDS.iter().zip(values(p)) {
-                            ui.label(RichText::new(*label).color(theme::muted()));
+                            ui.label(RichText::new(t(label)).color(theme::muted()));
                             ui.label(value);
                             ui.end_row();
                         }
                     });
                 }
                 ui.add_space(8.0);
-                ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.button("Close").clicked()).inner
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.button(t("Close")).clicked()).inner
             });
             if modal.inner || modal.should_close() || patient.is_none() {
                 self.patients.detail = false;

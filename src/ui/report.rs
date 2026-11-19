@@ -3,7 +3,7 @@
 
 use super::icons::{self, Icon, Layout as IconLayout};
 use super::viewer::{color_image, thumbnail};
-use super::{list_row, section, theme, App, Pending};
+use super::{list_row, section, t, theme, App, Pending};
 use eframe::egui::{self, pos2, vec2, Align, Align2, Color32, FontId, Layout, Rect, Stroke, TextureHandle, TextureOptions, Ui};
 use lumodent::pdf::{report_pdf, BODY_MM, SMALL_MM, TITLE_MM};
 use lumodent::reports::{fit, layout, page_text, Clinic, Draft, MmRect, Paper};
@@ -83,7 +83,7 @@ impl App {
         self.ws.save_clinic(&self.report.clinic)?;
         self.ws.save_report(&mut self.report.draft)?;
         self.load_reports()?;
-        self.notice = Some("Save report successful, you can reload the report and edit it later.".into());
+        self.notice = Some(t("Save report successful, you can reload the report and edit it later.").into());
         Ok(())
     }
 
@@ -108,7 +108,7 @@ impl App {
 
     fn pdf_bytes(&self) -> Result<Vec<u8>, String> {
         if self.report.draft.is_empty() {
-            return Err("Unable to print an empty report.".into());
+            return Err(t("Unable to print an empty report.").into());
         }
         Ok(report_pdf(&self.report.draft, &self.report.clinic, &lumodent::dates::local_timestamp()))
     }
@@ -118,7 +118,7 @@ impl App {
         let name = self.pdf_name();
         let Some(path) = (self.hooks.save_file)(&name, "pdf") else { return Ok(()) };
         std::fs::write(&path, bytes).map_err(|e| format!("Export PDF failed: {e}"))?;
-        self.notice = Some(format!("Report exported to {}", path.display()));
+        self.notice = Some(super::i18n::pick(format!("Report exported to {}", path.display()), format!("Laporan diekspor ke {}", path.display())));
         Ok(())
     }
 
@@ -143,13 +143,13 @@ impl App {
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.set_min_height(ui.available_height());
-                    section(ui, "REPORT LIST");
+                    section(ui, t("REPORT LIST"));
                     let width = ui.available_width();
                     let selected = self.report.rows.iter().position(|r| Some(r.pk) == self.report.draft.pk);
                     let (mut new, mut delete, mut open) = (false, false, None);
                     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                        delete = icons::button(ui, Some(Icon::Delete), "Delete Report", vec2(width, 32.0), IconLayout::Inline, selected.is_some(), false).clicked();
-                        new = icons::button(ui, Some(Icon::NewDoc), "New Report", vec2(width, 32.0), IconLayout::Inline, true, false).clicked();
+                        delete = icons::button(ui, Some(Icon::Delete), t("Delete Report"), vec2(width, 32.0), IconLayout::Inline, selected.is_some(), false).clicked();
+                        new = icons::button(ui, Some(Icon::NewDoc), t("New Report"), vec2(width, 32.0), IconLayout::Inline, true, false).clicked();
                         ui.add_space(4.0);
                         ui.with_layout(Layout::top_down(Align::Min), |ui| {
                             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -165,7 +165,7 @@ impl App {
                     });
                     if let Some(i) = open.filter(|&i| Some(i) != selected) {
                         if self.unsaved() {
-                            self.ask("The current report has not been saved. Discard the changes?", Pending::DiscardForReport(i));
+                            self.ask(t("The current report has not been saved. Discard the changes?"), Pending::DiscardForReport(i));
                         } else {
                             let result = self.load_report(i);
                             self.check(result);
@@ -173,14 +173,14 @@ impl App {
                     }
                     if new {
                         if self.unsaved() {
-                            self.ask("The current report has not been saved. Discard the changes?", Pending::DiscardForNewReport);
+                            self.ask(t("The current report has not been saved. Discard the changes?"), Pending::DiscardForNewReport);
                         } else {
                             self.reset_draft();
                         }
                     }
                     if delete {
                         if let Some(row) = selected.and_then(|i| self.report.rows.get(i)).cloned() {
-                            self.ask("The selected report will be deleted, are you sure to do so?", Pending::DeleteReport(row));
+                            self.ask(t("The selected report will be deleted, are you sure to do so?"), Pending::DeleteReport(row));
                         }
                     }
                 });
@@ -194,9 +194,9 @@ impl App {
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.set_min_height(ui.available_height());
-                    section(ui, "CLINIC INFORMATION");
+                    section(ui, t("CLINIC INFORMATION"));
                     let clinic = &mut self.report.clinic;
-                    for (label, value, rows) in [("Clinic Name", &mut clinic.name, 1), ("Clinic Address", &mut clinic.address, 2), ("Clinic Phone", &mut clinic.phone, 1)] {
+                    for (label, value, rows) in [(t("Clinic Name"), &mut clinic.name, 1), (t("Clinic Address"), &mut clinic.address, 2), (t("Clinic Phone"), &mut clinic.phone, 1)] {
                         let caption = ui.label(label);
                         let edit = if rows == 1 {
                             egui::TextEdit::singleline(value)
@@ -206,17 +206,17 @@ impl App {
                         ui.add(edit.desired_width(f32::INFINITY)).labelled_by(caption.id);
                     }
                     ui.add_space(4.0);
-                    let caption = ui.label("Note");
+                    let caption = ui.label(t("Note"));
                     let note = ui.add(egui::TextEdit::multiline(&mut self.report.draft.doc.note).desired_rows(5).desired_width(f32::INFINITY));
                     if note.labelled_by(caption.id).changed() {
                         self.report.draft.dirty = true;
                     }
                     ui.add_space(4.0);
-                    section(ui, "REPORT IMAGES");
+                    section(ui, t("REPORT IMAGES"));
                     let width = ui.available_width();
                     let mut remove = false;
                     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                        remove = icons::button(ui, Some(Icon::Delete), "Remove Image", vec2(width, 32.0), IconLayout::Inline, self.report.selected_image.is_some(), false).clicked();
+                        remove = icons::button(ui, Some(Icon::Delete), t("Remove Image"), vec2(width, 32.0), IconLayout::Inline, self.report.selected_image.is_some(), false).clicked();
                         ui.with_layout(Layout::top_down(Align::Min), |ui| {
                             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                                 for (i, thumb) in thumbs.iter().enumerate() {
@@ -246,7 +246,7 @@ impl App {
                     let doc = &mut self.report.draft.doc;
                     let before = (doc.paper, doc.landscape, doc.header, doc.footer);
                     egui::Grid::new("page-settings").num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
-                        let caption = ui.label("Paper Size");
+                        let caption = ui.label(t("Paper Size"));
                         let combo = egui::ComboBox::from_id_salt("paper").width(110.0).selected_text(doc.paper.name()).show_ui(ui, |ui| {
                             for paper in Paper::ALL {
                                 ui.selectable_value(&mut doc.paper, paper, paper.name());
@@ -254,21 +254,21 @@ impl App {
                         });
                         combo.response.labelled_by(caption.id);
                         ui.end_row();
-                        let caption = ui.label("Orientation");
+                        let caption = ui.label(t("Orientation"));
                         let combo = egui::ComboBox::from_id_salt("orientation")
                             .width(110.0)
-                            .selected_text(if doc.landscape { "Landscape" } else { "Portrait" })
+                            .selected_text(if doc.landscape { t("Landscape") } else { t("Portrait") })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut doc.landscape, false, "Portrait");
-                                ui.selectable_value(&mut doc.landscape, true, "Landscape");
+                                ui.selectable_value(&mut doc.landscape, false, t("Portrait"));
+                                ui.selectable_value(&mut doc.landscape, true, t("Landscape"));
                             });
                         combo.response.labelled_by(caption.id);
                         ui.end_row();
                     });
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
-                        ui.checkbox(&mut doc.header, "Header Show");
-                        ui.checkbox(&mut doc.footer, "Footer Show");
+                        ui.checkbox(&mut doc.header, t("Header Show"));
+                        ui.checkbox(&mut doc.footer, t("Footer Show"));
                     });
                     if (doc.paper, doc.landscape, doc.header, doc.footer) != before {
                         self.report.draft.dirty = true;
@@ -276,15 +276,15 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let size = vec2(88.0, 58.0);
                         let ready = !self.report.draft.is_empty();
-                        if icons::button(ui, Some(Icon::Print), "Print", size, IconLayout::Stacked, ready, false).clicked() {
+                        if icons::button(ui, Some(Icon::Print), t("Print"), size, IconLayout::Stacked, ready, false).clicked() {
                             let result = self.print_report();
                             self.check(result);
                         }
-                        if icons::button(ui, Some(Icon::Pdf), "Export PDF", size, IconLayout::Stacked, ready, false).clicked() {
+                        if icons::button(ui, Some(Icon::Pdf), t("Export PDF"), size, IconLayout::Stacked, ready, false).clicked() {
                             let result = self.export_pdf();
                             self.check(result);
                         }
-                        if icons::button(ui, Some(Icon::Save), "Save Report", size, IconLayout::Stacked, true, false).clicked() {
+                        if icons::button(ui, Some(Icon::Save), t("Save Report"), size, IconLayout::Stacked, true, false).clicked() {
                             let result = self.save_report();
                             self.check(result);
                         }
@@ -338,7 +338,7 @@ impl App {
             painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_gray(190)), egui::StrokeKind::Outside);
         }
         if let Some(n) = blocks.note {
-            line((n.0, n.1, n.2, n.1 + 6.0), "Note", BODY_MM, dark, Align2::LEFT_TOP);
+            line((n.0, n.1, n.2, n.1 + 6.0), t("Note"), BODY_MM, dark, Align2::LEFT_TOP);
             let body = to((n.0, n.1 + 6.5, n.2, n.3));
             let galley = painter.layout(text.note.clone(), font(BODY_MM), dark, body.width());
             painter.with_clip_rect(body).galley(body.min, galley, dark);

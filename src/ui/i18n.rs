@@ -1,0 +1,173 @@
+//! Interface language. English strings are the keys; `t` returns the
+//! Indonesian text when that language is chosen (Tools → Language).
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static INDONESIAN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_indonesian(on: bool) {
+    INDONESIAN.store(on, Ordering::Relaxed);
+}
+
+pub fn is_indonesian() -> bool {
+    INDONESIAN.load(Ordering::Relaxed)
+}
+
+/// Picks the English or Indonesian form, for messages built with `format!`.
+pub fn pick(en: String, id: String) -> String {
+    if is_indonesian() { id } else { en }
+}
+
+/// Translates an interface string; unknown strings stay English.
+pub fn t(en: &'static str) -> &'static str {
+    if !is_indonesian() {
+        return en;
+    }
+    match en {
+        // Menus and window
+        "File" => "Berkas",
+        "View" => "Tampilan",
+        "Tools" => "Alat",
+        "Help" => "Bantuan",
+        "About" => "Tentang",
+        "Exit" => "Keluar",
+        "Close" => "Tutup",
+        "Close window" => "Tutup jendela",
+        "Minimize" => "Kecilkan",
+        "Maximize" => "Besarkan",
+        "Restore" => "Pulihkan",
+        "Full Screen" => "Layar Penuh",
+        "Theme" => "Tema",
+        "Dark" => "Gelap",
+        "Light" => "Terang",
+        "Language" => "Bahasa",
+        "Open Data Folder" => "Buka Folder Data",
+        "Open Patient Image Folder" => "Buka Folder Gambar Pasien",
+        "Keyboard Shortcuts" => "Pintasan Keyboard",
+        "Import Image…" => "Impor Gambar…",
+        "Export Image as PNG…" => "Ekspor Gambar sebagai PNG…",
+        "Export Image as DICOM…" => "Ekspor Gambar sebagai DICOM…",
+        "Export Report as PDF…" => "Ekspor Laporan sebagai PDF…",
+        "Print Report…" => "Cetak Laporan…",
+        "Intraoral X-ray workstation" => "Workstation rontgen intraoral",
+        "Save As" => "Simpan Sebagai",
+        "Image Files (.jpg .jpeg .png .bmp .dcm)" => "Berkas Gambar (.jpg .jpeg .png .bmp .dcm)",
+        // Navigation
+        "Patient" => "Pasien",
+        "Acquisition" => "Akuisisi",
+        "Viewer" => "Penampil",
+        "Report" => "Laporan",
+        "Please select a patient." => "Silakan pilih pasien.",
+        "The Acquisition module is not available in LumoDent yet." => "Modul Akuisisi belum tersedia di LumoDent.",
+        // Dialogs
+        "OK" | "Ok" => "OK",
+        "Yes" => "Ya",
+        "No" => "Tidak",
+        "Cancel" => "Batal",
+        "QUESTION" => "PERTANYAAN",
+        // Patient screen
+        "SEARCH" => "CARI",
+        "Search" => "Cari",
+        "Search patients" => "Cari pasien",
+        "Chart No., name or phone" => "No. rekam medis, nama atau telepon",
+        "QUICK SEARCH" => "PENCARIAN CEPAT",
+        "Recently Acquired" => "Baru Diambil",
+        "Recently Printed" => "Baru Dicetak",
+        "New Patient" => "Pasien Baru",
+        "Edit Patient" => "Ubah Pasien",
+        "Delete Patient" => "Hapus Pasien",
+        "Clear List" => "Kosongkan Daftar",
+        "Date" => "Tanggal",
+        "Show Detail" => "Lihat Detail",
+        "PATIENT SEARCH RESULT" => "HASIL PENCARIAN PASIEN",
+        "PATIENT DETAIL INFORMATION" => "INFORMASI DETAIL PASIEN",
+        "NEW PATIENT" => "PASIEN BARU",
+        "EDIT PATIENT" => "UBAH PASIEN",
+        "No patients to show. Use New Patient to add one." => "Tidak ada pasien. Gunakan Pasien Baru untuk menambah.",
+        "All of the patient's data will be deleted, are you sure to do so?" => "Semua data pasien akan dihapus. Yakin ingin melanjutkan?",
+        "Patient's Chart Number can't be empty, please input one." => "No. rekam medis pasien tidak boleh kosong, silakan isi.",
+        "Patient's name can't be empty, please input one." => "Nama pasien tidak boleh kosong, silakan isi.",
+        // Patient fields
+        "Chart No." => "No. RM",
+        "Name" => "Nama",
+        "First Name" => "Nama Depan",
+        "Last Name" => "Nama Belakang",
+        "Gender" => "Jenis Kelamin",
+        "Date of Birth" => "Tanggal Lahir",
+        "Doctor" => "Dokter",
+        "Social ID" => "NIK",
+        "Phone" => "Telepon",
+        "E-Mail" => "E-Mail",
+        "Zip Code" => "Kode Pos",
+        "Address" => "Alamat",
+        // Date filters
+        "All Dates" => "Semua Tanggal",
+        "Today" => "Hari Ini",
+        "Yesterday" => "Kemarin",
+        "Three Days" => "Tiga Hari",
+        "This Week" => "Minggu Ini",
+        "Last Week" => "Minggu Lalu",
+        "This Month" => "Bulan Ini",
+        "Last Month" => "Bulan Lalu",
+        "Three Months" => "Tiga Bulan",
+        "Six Months" => "Enam Bulan",
+        // Viewer
+        "IMAGES" => "GAMBAR",
+        "Import Image" => "Impor Gambar",
+        "Delete Image" => "Hapus Gambar",
+        "Rotate Left" => "Putar Kiri",
+        "Rotate Right" => "Putar Kanan",
+        "Flip Horizontal" => "Balik Horiz.",
+        "Flip Vertical" => "Balik Vert.",
+        "Invert" => "Negatif",
+        "Fit" => "Pas Layar",
+        "Send to Report" => "Ke Laporan",
+        "Export Image" => "Ekspor PNG",
+        "Export DICOM" => "Ekspor DICOM",
+        "Zoom In" => "Perbesar",
+        "Zoom Out" => "Perkecil",
+        "Brightness" => "Kecerahan",
+        "Contrast" => "Kontras",
+        "Reset" => "Reset",
+        "No image selected." => "Belum ada gambar dipilih.",
+        "No images for this patient. Use Import Image to add one." => "Pasien ini belum punya gambar. Gunakan Impor Gambar untuk menambah.",
+        "The selected image will be deleted, are you sure to do so?" => "Gambar yang dipilih akan dihapus. Yakin ingin melanjutkan?",
+        "Error with send image to report, please retry." => "Gagal mengirim gambar ke laporan, silakan coba lagi.",
+        // Report
+        "REPORT LIST" => "DAFTAR LAPORAN",
+        "New Report" => "Laporan Baru",
+        "Delete Report" => "Hapus Laporan",
+        "Paper Size" => "Ukuran Kertas",
+        "Orientation" => "Orientasi",
+        "Portrait" => "Tegak",
+        "Landscape" => "Mendatar",
+        "Header Show" => "Tampilkan Header",
+        "Footer Show" => "Tampilkan Footer",
+        "Save Report" => "Simpan Laporan",
+        "Export PDF" => "Ekspor PDF",
+        "Print" => "Cetak",
+        "CLINIC INFORMATION" => "INFORMASI KLINIK",
+        "Clinic Name" => "Nama Klinik",
+        "Clinic Address" => "Alamat Klinik",
+        "Clinic Phone" => "Telepon Klinik",
+        "Note" => "Catatan",
+        "REPORT IMAGES" => "GAMBAR LAPORAN",
+        "Remove Image" => "Hapus Gambar",
+        "Save report successful, you can reload the report and edit it later." => "Laporan tersimpan. Laporan bisa dibuka dan diubah lagi nanti.",
+        "The current report has not been saved. Discard the changes?" => "Laporan ini belum disimpan. Buang perubahannya?",
+        "The selected report will be deleted, are you sure to do so?" => "Laporan yang dipilih akan dihapus. Yakin ingin melanjutkan?",
+        "Unable to print an empty report." => "Tidak bisa mencetak laporan kosong.",
+        _ => en,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn english_is_the_default_and_unknown_strings_pass_through() {
+        assert_eq!(t("Patient"), "Patient");
+        assert_eq!(t("Not in the table"), "Not in the table");
+    }
+}
