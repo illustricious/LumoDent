@@ -189,7 +189,7 @@ impl App {
         egui::Panel::right("report-right")
             .exact_size(280.0)
             .resizable(false)
-            .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 8, top: 8, bottom: 8 }))
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(8)))
             .show(ui, |ui| {
                 theme::panel_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -240,7 +240,7 @@ impl App {
             });
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 8, top: 8, bottom: 8 }))
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(8)))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let doc = &mut self.report.draft.doc;

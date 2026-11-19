@@ -278,7 +278,7 @@ impl App {
             });
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 8, top: 8, bottom: 8 }))
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(8)))
             .show(ui, |ui| {
                 let has_image = self.viewer.image.is_some();
                 ui.horizontal(|ui| {

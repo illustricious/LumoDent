@@ -75,13 +75,25 @@ impl Hooks {
 }
 
 /// Opens a file in the default application, e.g. a PDF viewer for printing.
+/// On Windows this calls ShellExecuteW directly, so no console window flashes
+/// up the way `cmd /C start` did.
+#[cfg(windows)]
 pub fn open_with_system(path: &Path) -> Result<(), String> {
-    #[cfg(windows)]
-    let mut command = {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]).arg(path);
-        c
-    };
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "shell32", kind = "raw-dylib")]
+    extern "system" {
+        fn ShellExecuteW(hwnd: isize, op: *const u16, file: *const u16, params: *const u16, dir: *const u16, show: i32) -> isize;
+    }
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open".as_ref()), wide(path.as_os_str()));
+    const SW_SHOWNORMAL: i32 = 1;
+    // Values above 32 mean success.
+    let code = unsafe { ShellExecuteW(0, verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+    if code > 32 { Ok(()) } else { Err(format!("Cannot open {} (error {code}).", path.display())) }
+}
+
+#[cfg(not(windows))]
+pub fn open_with_system(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut c = std::process::Command::new("open");
