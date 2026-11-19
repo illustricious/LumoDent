@@ -29,6 +29,7 @@ pub enum Icon {
     Reset,
     ExportImage,
     Measure,
+    Filter,
     FlipH,
     FlipV,
     Invert,
@@ -202,6 +203,13 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, color: Color32) {
             p.add(Shape::line(pts, s));
             arrow_head(p, start + vec2(w * 0.02, -w * 0.1), vec2(0.3, -1.0), w * 0.18, color);
             p.circle_filled(c, w * 0.06, color);
+        }
+        Icon::Filter => {
+            for (row, knob) in [(0.25, 0.68), (0.5, 0.32), (0.75, 0.56)] {
+                let y = at(0.0, row).y;
+                p.line_segment([pos2(at(0.12, 0.0).x, y), pos2(at(0.88, 0.0).x, y)], s);
+                p.circle_filled(at(knob, row), w * 0.09, color);
+            }
         }
         Icon::Measure => {
             let a = at(0.12, 0.7);

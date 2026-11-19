@@ -98,11 +98,11 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 | Kelas | Peran | Sudah di Rust | Total |
 |---|---|---:|---:|
 | DataAccessor | Database lokal | 16 (Patient 4, Recent 2, Study 4, Report 4, Create/CheckMainDB 2) | 34 |
-| ImageProcessing | Olah citra | 5 (RotateImage, FlipX, FlipY, Invert, BrightnessAndContrast; rumus milik rewrite) | 17 |
+| ImageProcessing | Olah citra | 17 (semua; `src/processing.rs` menambah Set, MultiplyConstant, GetAverageValue, GetMinMax×2, ImageNormalizeEx, AutoBrightnessAndContrast, MedianSmooth, Smoothness, Sharpness, MultScaleWLN, MatTransfor; rumus milik rewrite) | 17 |
 | DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
-| **Jumlah** | | **22** | **81** |
+| **Jumlah** | | **34** | **81** |
 
 Belum dikerjakan di DataAccessor: Analysis, Product, User, CloudUser dan basis data User (18 metode). Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
 

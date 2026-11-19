@@ -5,6 +5,7 @@ use super::icons::{self, Icon, Layout as IconLayout};
 use super::{list_row, section, t, theme, App, Pending};
 use eframe::egui::{self, pos2, vec2, Align, Color32, ColorImage, Layout, Rect, TextureHandle, TextureOptions, Ui};
 use lumodent::image::{levels, Image, Viewport};
+use lumodent::processing;
 use lumodent::patients::Patient;
 use lumodent::reports::Draft;
 use lumodent::studies::Study;
@@ -286,6 +287,25 @@ impl App {
                             self.viewer.edit(f);
                         }
                     }
+                    let filters = icons::button(ui, Some(Icon::Filter), t("Filters"), size, IconLayout::Stacked, has_image, false);
+                    egui::Popup::menu(&filters).show(|ui| {
+                        ui.set_min_width(170.0);
+                        let items: [(&str, fn(&mut Image)); 6] = [
+                            ("Auto Level", |i| {
+                                processing::auto_levels(i, 0.5);
+                            }),
+                            ("Enhance Detail", |i| processing::enhance(i, 3, 1.0)),
+                            ("Sharpen", |i| processing::sharpen(i, 1.5, 1.0)),
+                            ("Smooth", |i| processing::smooth(i, 1.2)),
+                            ("Reduce Noise", |i| processing::median(i, 1)),
+                            ("Normalize", processing::normalize),
+                        ];
+                        for (label, f) in items {
+                            if ui.button(t(label)).clicked() {
+                                self.viewer.edit(f);
+                            }
+                        }
+                    });
                     if icons::button(ui, Some(Icon::Fit), t("Fit"), size, IconLayout::Stacked, has_image, false).clicked() {
                         self.viewer.viewport = Viewport::default();
                     }

@@ -9,6 +9,7 @@ pub mod dicom;
 pub mod image;
 pub mod patients;
 pub mod pdf;
+pub mod processing;
 pub mod reports;
 pub mod studies;
 pub mod workspace;
