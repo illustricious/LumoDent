@@ -99,10 +99,12 @@ Inventaris 25.801 prosedur di executable referensi didominasi pustaka (ImGui, sp
 |---|---|---:|---:|
 | DataAccessor | Database lokal | 34 (semua: Patient, Recent, Study, Report, Analysis, Create/CheckMainDB di `patients.rs`; Product, User, CloudUser, Create/CheckUserDB di `users.rs`) | 34 |
 | ImageProcessing | Olah citra | 17 (semua di `src/processing.rs`; 10 algoritma dipetakan dari biner, lihat bagian ImageProcessing) | 17 |
-| DicomProcessor | DICOM | 1 (SaveDicomFile; pembaca DICOM ditambahkan, empat nama metode lain belum terpetakan) | 6 |
+| DicomProcessor | DICOM | 6 (semua di `src/dicom.rs`: IsDicom → `is_dicom`, LoadFile/GetDicomImage → `parse`, SaveDicomFile → `write`, GetUid → `uid(UidKind)`, GetCurrentDateTime → `current_datetime`, GetInternal/FullDatasetMap → `Dicom::elements`) | 6 |
 | CFinnoRay | Sensor akuisisi | 0 | 18 |
 | AnalysisServerAccessor | Layanan cloud | 0 | 6 |
-| **Jumlah** | | **52** | **81** |
+| **Jumlah** | | **57** | **81** |
+
+DicomProcessor (didekompilasi dengan Ghidra) adalah pembungkus DCMTK. IsDicom membaca 4 byte di offset 128 dan membandingkan dengan "DICM". GetUid memanggil `dcmGenerateUniqueIdentifier` dengan root OFFIS `1.2.276.0.7230010.3.1.{2,3,4}` untuk study/series/instance. LumoDent tidak memakai root milik OFFIS dan memakai bentuk `2.25.<angka>` yang tidak butuh registrasi. GetCurrentDateTime memanggil `DcmDateTime::getCurrentDateTime` dengan detik dan pecahan, hasilnya `YYYYMMDDHHMMSS.FFFFFF`. GetLocaleEncoding (pemilihan code page CP1252/UTF-8/GB18030 dan lain-lain) tidak diperlukan karena LumoDent menulis teks UTF-8 langsung. InsertElement belum punya padanan publik; elemen tambahan saat menulis ditentukan di dalam `write`.
 
 DataAccessor sudah lengkap. Dari empat modul layar utama, Patient, Viewer dan Report tersedia, sedangkan Acquisition belum.
 

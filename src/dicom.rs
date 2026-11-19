@@ -53,6 +53,10 @@ impl Tags {
 pub struct Dicom {
     pub tags: Tags,
     pub image: Image,
+    /// Every top-level element of the file (meta group included) in tag order,
+    /// like the reference GetFullDatasetMap. Text values are shown as written;
+    /// binary ones as a byte count.
+    pub elements: Vec<(u32, String)>,
 }
 
 /// True when the bytes carry the Part 10 preamble and "DICM" marker.
@@ -228,6 +232,7 @@ fn time(tm: &str) -> String {
 /// Parses a DICOM file into its tags and an 8-bit display image.
 pub fn parse(data: &[u8]) -> Result<Dicom, String> {
     let owned;
+    let mut meta_values: Vec<(u32, &[u8])> = Vec::new();
     let (meta, body, syntax) = if is_dicom(data) {
         let mut r = Reader { d: data, pos: 132, explicit: true };
         let mut meta = HashMap::new();
@@ -235,7 +240,8 @@ pub fn parse(data: &[u8]) -> Result<Dicom, String> {
             let (t, len) = r.header()?;
             meta.insert(t, r.bytes(len as usize)?);
         }
-        let syntax = Elements { values: meta, pixels: None }.text(tag(0x0002, 0x0010));
+        let syntax = Elements { values: meta.clone(), pixels: None }.text(tag(0x0002, 0x0010));
+        meta_values = meta.into_iter().collect::<Vec<_>>();
         (r.pos, data, syntax)
     } else if data.len() > 8 && data[..2] == [0x08, 0x00] {
         // A bare dataset without the Part 10 header: assume Implicit VR Little Endian.
@@ -257,6 +263,8 @@ pub fn parse(data: &[u8]) -> Result<Dicom, String> {
     };
     let mut r = Reader { d: body, pos: start, explicit };
     let e = read_dataset(&mut r)?;
+    let mut elements: Vec<(u32, String)> = meta_values.iter().map(|(t, v)| (*t, show(v))).chain(e.values.iter().map(|(t, v)| (*t, show(v)))).collect();
+    elements.sort_by_key(|(t, _)| *t);
 
     let name = e.text(tag(0x0010, 0x0010));
     let mut parts = name.split('^');
@@ -295,7 +303,7 @@ pub fn parse(data: &[u8]) -> Result<Dicom, String> {
         }
         Some(Pixels::Native(raw)) => native_image(&e, raw)?,
     };
-    Ok(Dicom { tags, image })
+    Ok(Dicom { tags, image, elements })
 }
 
 fn native_image(e: &Elements, raw: &[u8]) -> Result<Image, String> {
@@ -353,6 +361,37 @@ fn native_image(e: &Elements, raw: &[u8]) -> Result<Image, String> {
         })
         .collect();
     Ok(Image { width: cols, height: rows, pixels })
+}
+
+/// Shows an element value: printable text as written, anything else as a size.
+fn show(v: &[u8]) -> String {
+    let text = v.iter().all(|b| b.is_ascii_graphic() || *b == b' ' || *b == 0);
+    if text && v.len() <= 1024 {
+        String::from_utf8_lossy(v).trim_end_matches([' ', '\0']).to_string()
+    } else {
+        format!("<{} bytes>", v.len())
+    }
+}
+
+/// What a generated UID is for. The reference (DCMTK) puts each kind under its
+/// own OFFIS sub-root; LumoDent has no registered root, so every kind uses the
+/// UUID-derived 2.25 form, which needs none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UidKind {
+    Plain,
+    Study,
+    Series,
+    Instance,
+}
+
+pub fn uid(_kind: UidKind) -> String {
+    new_uid()
+}
+
+/// The current local date and time as a DICOM DT value with seconds and
+/// microseconds, YYYYMMDDHHMMSS.FFFFFF (the reference GetCurrentDateTime).
+pub fn current_datetime() -> String {
+    chrono::Local::now().format("%Y%m%d%H%M%S%.6f").to_string()
 }
 
 /// A new globally unique identifier under the UUID-derived 2.25 root.
@@ -497,6 +536,22 @@ mod tests {
         assert_eq!((d.tags.sop_instance_uid.as_str(), d.tags.sop_class_uid.as_str()), ("2.25.42", INTRAORAL_CLASS));
         assert_eq!((d.tags.datetime.as_str(), d.tags.accession_number.as_str()), ("2026-11-19 08:30:05", "A7"));
         assert!(crate::image::decode(&bytes).is_ok());
+        // The dataset map lists meta and body elements in tag order.
+        let find = |t: u32| d.elements.iter().find(|(k, _)| *k == t).map(|(_, v)| v.as_str());
+        assert_eq!(find(tag(0x0002, 0x0010)), Some(EXPLICIT_LE));
+        assert_eq!(find(tag(0x0010, 0x0010)), Some("Wijaya^Sari"));
+        assert_eq!(find(tag(0x0028, 0x0010)), Some("<2 bytes>"));
+        assert!(d.elements.windows(2).all(|w| w[0].0 < w[1].0));
+    }
+
+    #[test]
+    fn uids_and_datetime_have_dicom_shape() {
+        let (a, b) = (uid(UidKind::Study), uid(UidKind::Instance));
+        assert!(a != b && valid_uid(&a) && valid_uid(&b) && a.starts_with("2.25."));
+        let dt = current_datetime();
+        assert_eq!(dt.len(), 21);
+        assert_eq!(dt.as_bytes()[14], b'.');
+        assert!(dt.chars().filter(|c| *c != '.').all(|c| c.is_ascii_digit()));
     }
 
     #[test]
