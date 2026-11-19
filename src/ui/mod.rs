@@ -4,6 +4,7 @@
 
 pub mod i18n;
 pub mod icons;
+mod acquisition;
 mod patient;
 mod report;
 mod settings;
@@ -28,6 +29,7 @@ pub use viewer::ViewerState;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Patient,
+    Acquisition,
     Viewer,
     Report,
 }
@@ -122,6 +124,7 @@ pub struct App {
     pub settings: lumodent::settings::Settings,
     pub(crate) settings_dialog: Option<settings::Dialog>,
     started: bool,
+    acquisition_patient: Option<Patient>,
     pub hooks: Hooks,
     left_width: f32,
 }
@@ -142,6 +145,7 @@ impl App {
             settings,
             settings_dialog: None,
             started: false,
+            acquisition_patient: None,
             hooks,
             left_width: 180.0,
         };
@@ -185,6 +189,7 @@ impl App {
     fn context_patient(&self) -> Option<Patient> {
         match self.screen {
             Screen::Patient => self.patients.selected_patient().cloned(),
+            Screen::Acquisition => self.acquisition_patient.clone(),
             Screen::Viewer => self.viewer.patient.clone(),
             Screen::Report => self.report.draft.patient.clone(),
         }
@@ -204,6 +209,14 @@ impl App {
                 if let Some(pk) = self.context_patient().map(|p| p.pk) {
                     self.patients.selected = Some(pk);
                 }
+            }
+            Screen::Acquisition => {
+                let Some(patient) = self.context_patient() else {
+                    self.notice = Some(t("Please select a patient.").into());
+                    return;
+                };
+                self.acquisition_patient = Some(patient);
+                self.screen = Screen::Acquisition;
             }
             Screen::Viewer | Screen::Report => {
                 let Some(patient) = self.context_patient() else {
@@ -256,6 +269,7 @@ impl App {
             .show(ui, |ui| self.header(ui));
         match self.screen {
             Screen::Patient => self.patient_screen(ui),
+            Screen::Acquisition => self.acquisition_screen(ui),
             Screen::Viewer => self.viewer_screen(ui),
             Screen::Report => self.report_screen(ui),
         }
@@ -396,7 +410,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let tabs = [
                         (Icon::Patient, t("Patient"), Some(Screen::Patient)),
-                        (Icon::Acquisition, t("Acquisition"), None),
+                        (Icon::Acquisition, t("Acquisition"), Some(Screen::Acquisition)),
                         (Icon::Viewer, t("Viewer"), Some(Screen::Viewer)),
                         (Icon::Report, t("Report"), Some(Screen::Report)),
                     ];

@@ -39,6 +39,15 @@ pub enum Icon {
     Save,
     Pdf,
     NewDoc,
+    Hand,
+    Line,
+    Rectangle,
+    Ellipse,
+    Pencil,
+    Memo,
+    Magnifier,
+    Grid,
+    Layout,
 }
 
 fn arc(center: Pos2, radius: f32, from: f32, to: f32) -> Vec<Pos2> {
@@ -131,6 +140,52 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, color: Color32) {
             for (i, f) in [0.42, 0.56, 0.7].into_iter().enumerate() {
                 let right = if i == 2 { 0.55 } else { 0.8 };
                 p.line_segment([pos2(page.left() + page.width() * 0.2, page.top() + page.height() * f), pos2(page.left() + page.width() * right, page.top() + page.height() * f)], s);
+            }
+        }
+        Icon::Hand => {
+            // Four arrows: pan.
+            for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
+                p.line_segment([c, c + d * w * 0.36], s);
+                arrow_head(p, c + d * w * 0.42, d, w * 0.14, color);
+            }
+        }
+        Icon::Line => {
+            p.line_segment([at(0.18, 0.82), at(0.82, 0.18)], s);
+            p.circle_filled(at(0.18, 0.82), w * 0.07, color);
+            p.circle_filled(at(0.82, 0.18), w * 0.07, color);
+        }
+        Icon::Rectangle => {
+            p.rect_stroke(Rect::from_min_max(at(0.16, 0.26), at(0.84, 0.74)), 1.0, s, StrokeKind::Middle);
+        }
+        Icon::Ellipse => {
+            p.add(egui::epaint::EllipseShape::stroke(c, vec2(w * 0.36, w * 0.24), s));
+        }
+        Icon::Pencil => {
+            p.add(Shape::line(vec![at(0.14, 0.7), at(0.3, 0.5), at(0.46, 0.66), at(0.62, 0.42), at(0.86, 0.6)], s));
+        }
+        Icon::Memo => {
+            let b = Rect::from_min_max(at(0.14, 0.18), at(0.86, 0.66));
+            p.rect_stroke(b, 3.0, s, StrokeKind::Middle);
+            p.add(Shape::line(vec![at(0.3, 0.66), at(0.26, 0.86), at(0.48, 0.66)], s));
+            p.line_segment([at(0.26, 0.34), at(0.74, 0.34)], s);
+            p.line_segment([at(0.26, 0.5), at(0.6, 0.5)], s);
+        }
+        Icon::Magnifier => {
+            p.circle_stroke(at(0.42, 0.42), w * 0.26, s);
+            p.line_segment([at(0.61, 0.61), at(0.86, 0.86)], Stroke::new(s.width * 1.6, color));
+            p.line_segment([at(0.42, 0.3), at(0.42, 0.54)], s);
+            p.line_segment([at(0.3, 0.42), at(0.54, 0.42)], s);
+        }
+        Icon::Grid => {
+            for k in 0..4 {
+                let f = 0.16 + 0.68 * k as f32 / 3.0;
+                p.line_segment([at(f, 0.16), at(f, 0.84)], s);
+                p.line_segment([at(0.16, f), at(0.84, f)], s);
+            }
+        }
+        Icon::Layout => {
+            for (x, y) in [(0.14, 0.14), (0.53, 0.14), (0.14, 0.53), (0.53, 0.53)] {
+                p.rect_stroke(Rect::from_min_size(at(x, y), vec2(w * 0.33, w * 0.33)), 1.0, s, StrokeKind::Middle);
             }
         }
         Icon::NewDoc => {
@@ -324,6 +379,8 @@ pub enum Layout {
     Stacked,
     /// Icon left of the label, for buttons in side panels.
     Inline,
+    /// Icon only; the label becomes the tooltip and accessible name.
+    IconOnly,
 }
 
 /// A themed button with a vector icon. Disabled buttons do not react.
@@ -361,11 +418,16 @@ pub fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, size: Vec2, layout: 
                 paint(p, icon_rect, icon, text);
                 p.text(pos2(icon_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, label, font, text);
             }
+            (Some(icon), Layout::IconOnly) => {
+                let side = (rect.height() - 10.0).min(22.0);
+                paint(p, Rect::from_center_size(rect.center(), vec2(side, side)), icon, text);
+            }
             (None, _) => {
                 p.text(rect.center(), Align2::CENTER_CENTER, label, font, text);
             }
         }
     }
+    let response = if layout == Layout::IconOnly { response.on_hover_text(label) } else { response };
     if enabled {
         response
     } else {

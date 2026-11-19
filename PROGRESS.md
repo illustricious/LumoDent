@@ -245,3 +245,16 @@ Dialog Settings asli punya lima tab; semua field dan daftar pilihannya dipetakan
 | Laporan | 0x58c3c0 | warna dan tebal bingkai, ukuran huruf 9–18 pt, warna teks (aslinya juga ukuran kertas, orientasi, header, footer) | disimpan; ukuran kertas, orientasi, header dan footer tetap diatur per laporan |
 
 Saat jenis generator diganti, aslinya mengatur ulang kV dan mA (DC → mA indeks 3, AC → indeks 1); `Settings::set_generator_ac` meniru itu. Algoritma nomor rekam medis otomatis aslinya belum dipetakan.
+
+## Alat Penampil dan layar Akuisisi
+
+Fitur yang tadinya hanya tersimpan di Pengaturan sekarang dipakai:
+
+- **Alat di bilah bawah Penampil** (`Tool`): Geser, Ukur, Garis, Persegi, Elips, Gambar Bebas, Memo, Kaca Pembesar. Klik alat yang aktif untuk kembali ke Geser; Esc juga. Klik kanan menghapus anotasi terakhir (di mode Ukur: penggaris terakhir). Tombol Hapus Anotasi membersihkan semuanya. Warna dan tebal tiap bentuk diambil dari Pengaturan.
+- **Memo**: klik di gambar membuka kotak teks dengan tombol Teks Cepat dari 7 preset di Pengaturan; warna kotak dan teks dari Gaya Memo.
+- **Grid** (tombol atau tombol G): garis tiap 1/2/5/10 mm sesuai skala mm/piksel gambar (atau kalibrasi), dengan warna, tebal dan opasitas dari Pengaturan; tidak digambar bila jaraknya di layar kurang dari 4 px.
+- **Kaca pembesar**: lensa persegi 100/150/200 px di bawah kursor, perbesaran 1,5/2,0/2,5× terhadap tampilan saat ini, bingkai memakai warna Bingkai Tangkapan.
+- **Layout 1x1, 1x2, 2x1, 2x2** (tombol layout atau Pengaturan): sel pertama berisi gambar yang dibuka dengan semua alat, sel lain menampilkan gambar berikutnya (diperkecil maksimal 1024 px); klik sel untuk membukanya.
+- **Layar Akuisisi**: panel generator DC/AC, kV dan mA seperti NanoPix, langsung tersimpan ke Pengaturan. Pengambilan gambar tetap menunggu driver sensor.
+
+Anotasi belum ikut tercetak saat Kirim ke Laporan atau Ekspor; itu disimpan terpisah dari piksel gambar.

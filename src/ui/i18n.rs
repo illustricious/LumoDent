@@ -43,6 +43,18 @@ pub fn t(en: &'static str) -> &'static str {
         "Language" => "Bahasa",
         "Open Data Folder" => "Buka Folder Data",
         "Open Patient Image Folder" => "Buka Folder Gambar Pasien",
+        // Viewer tools and acquisition
+        "Pan" => "Geser",
+        "Clear Annotations" => "Hapus Anotasi",
+        "No image" => "Tidak ada gambar",
+        "Memo" => "Memo",
+        "Quick Text" => "Teks Cepat",
+        "Add Memo" => "Tambah Memo",
+        "GENERATOR" => "GENERATOR",
+        "ACQUISITION" => "AKUISISI",
+        "Selected" => "Terpilih",
+        "Sensor not connected" => "Sensor belum terhubung",
+        "Capturing needs the sensor driver (sensor_io.dll for NanoPix-E, IOSensorAcquisition.dll for NanoPix 1/1.5/2), which LumoDent does not replace yet. Images can be imported on the Viewer screen." => "Pengambilan gambar membutuhkan driver sensor (sensor_io.dll untuk NanoPix-E, IOSensorAcquisition.dll untuk NanoPix 1/1.5/2), yang belum digantikan LumoDent. Gambar bisa diimpor di layar Penampil.",
         // Settings dialog
         "Settings…" => "Pengaturan…",
         "Settings" => "Pengaturan",

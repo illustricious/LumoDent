@@ -2,6 +2,7 @@
 //! the same way on every operating system.
 
 use super::*;
+use super::viewer::{Mark, Tool};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use lumodent::image::Image;
@@ -147,7 +148,7 @@ fn navigation_needs_a_patient() {
     click(&mut h, "Viewer");
     assert_eq!(notice(&mut h), "Please select a patient.");
     click(&mut h, "Acquisition");
-    assert!(notice(&mut h).contains("not available"));
+    assert_eq!(notice(&mut h), "Please select a patient.");
     assert_eq!(h.state().screen, Screen::Patient);
 }
 
@@ -283,10 +284,10 @@ fn render_screens() {
     click(&mut h, "Cancel");
     click(&mut h, "Viewer");
     h.state_mut().viewer.spacing = Some(0.035);
-    h.state_mut().viewer.measuring = true;
+    h.state_mut().viewer.tool = Tool::Measure;
     h.state_mut().viewer.measures.push([egui::pos2(150.0, 330.0), egui::pos2(270.0, 140.0)]);
     shot(&mut h, "3-viewer.png");
-    h.state_mut().viewer.measuring = false;
+    h.state_mut().viewer.tool = Tool::Pan;
     click(&mut h, "Send to Report");
     click(&mut h, "OK");
     h.get_by_label_contains("1.").click();
@@ -312,7 +313,34 @@ fn render_screens() {
     shot(&mut h, "10-id-viewer.png");
     click(&mut h, "Laporan");
     shot(&mut h, "11-id-report.png");
+    click(&mut h, "Penampil");
     i18n::set_indonesian(false);
+
+    // Viewer tools: annotations, grid, magnifier lens, a 2x2 layout.
+    let p = |x, y| egui::pos2(x, y);
+    h.state_mut().settings.memo_presets[0] = "Caries".into();
+    h.state_mut().viewer.spacing = Some(0.035);
+    h.state_mut().viewer.grid = true;
+    h.state_mut().viewer.marks.extend([
+        Mark::Line([p(60.0, 60.0), p(260.0, 120.0)]),
+        Mark::Rectangle([p(300.0, 80.0), p(420.0, 180.0)]),
+        Mark::Ellipse([p(120.0, 220.0), p(260.0, 300.0)]),
+        Mark::Draw(vec![p(320.0, 240.0), p(350.0, 260.0), p(380.0, 230.0), p(410.0, 270.0)]),
+        Mark::Memo { at: p(80.0, 330.0), text: "Caries 36 distal".into() },
+    ]);
+    h.state_mut().viewer.measures.push([p(150.0, 330.0), p(270.0, 140.0)]);
+    shot(&mut h, "12-annotations-grid.png");
+    h.state_mut().viewer.tool = Tool::Memo;
+    h.state_mut().viewer.memo_edit = Some((p(420.0, 300.0), "Recall".into()));
+    shot(&mut h, "13-memo-editor.png");
+    h.state_mut().viewer.memo_edit = None;
+    h.state_mut().viewer.tool = Tool::Pan;
+    h.state_mut().viewer.grid = false;
+    h.state_mut().settings.layout = 3;
+    shot(&mut h, "14-layout-2x2.png");
+    h.state_mut().settings.layout = 0;
+    click(&mut h, "Acquisition");
+    shot(&mut h, "15-acquisition.png");
 }
 
 fn seed_demo(dir: &Path) {
@@ -387,4 +415,60 @@ fn settings_dialog_saves_clinic_and_preferences() {
     assert_eq!(h.state().report.clinic.name, "Klinik Senyum");
     let saved = lumodent::settings::Settings::load(&env.dir.join("data").join("settings.txt"));
     assert_eq!(saved.icon_size, lumodent::settings::IconSize::Big);
+}
+
+#[test]
+fn viewer_tools_grid_layout_memo_and_generator() {
+    let (mut h, env) = start("tools");
+    h.run();
+    add_patient(&mut h, "P-09", "Halim", "Rina");
+    click(&mut h, "Viewer");
+    for name in ["a.png", "b.jpg"] {
+        *env.pick.borrow_mut() = Some(file(&env, name, if name.ends_with("png") { PNG } else { JPG }));
+        click(&mut h, "Import Image");
+    }
+    // Tool buttons switch the tool; clicking the active one returns to panning.
+    click(&mut h, "Line");
+    assert_eq!(h.state().viewer.tool, Tool::Line);
+    click(&mut h, "Line");
+    assert_eq!(h.state().viewer.tool, Tool::Pan);
+    click(&mut h, "Magnifier");
+    assert_eq!(h.state().viewer.tool, Tool::Magnifier);
+    click(&mut h, "Grid");
+    assert!(h.state().viewer.grid);
+
+    // Every annotation kind draws.
+    let p = |x, y| egui::pos2(x, y);
+    h.state_mut().viewer.marks.extend([
+        Mark::Line([p(1.0, 1.0), p(20.0, 10.0)]),
+        Mark::Rectangle([p(2.0, 2.0), p(12.0, 8.0)]),
+        Mark::Ellipse([p(4.0, 4.0), p(14.0, 12.0)]),
+        Mark::Draw(vec![p(1.0, 1.0), p(5.0, 3.0), p(9.0, 8.0)]),
+    ]);
+    h.run();
+
+    // A memo takes a preset from Settings.
+    h.state_mut().settings.memo_presets[0] = "Karies".into();
+    click(&mut h, "Memo");
+    h.state_mut().viewer.memo_edit = Some((p(3.0, 3.0), String::new()));
+    h.run();
+    click(&mut h, "Karies");
+    click(&mut h, "Add Memo");
+    assert_eq!(h.state().viewer.marks.last(), Some(&Mark::Memo { at: p(3.0, 3.0), text: "Karies".into() }));
+    click(&mut h, "Clear Annotations");
+    assert!(h.state().viewer.marks.is_empty());
+
+    // A 2x2 layout shows the other image beside the open one.
+    h.state_mut().settings.layout = 3;
+    h.run();
+    h.state_mut().settings.layout = 0;
+
+    // Generator choices on the Acquisition screen are saved at once.
+    click(&mut h, "Acquisition");
+    assert_eq!(h.state().screen, Screen::Acquisition);
+    click(&mut h, "AC");
+    click(&mut h, "80");
+    let saved = lumodent::settings::Settings::load(&env.dir.join("data").join("settings.txt"));
+    assert!(saved.generator_ac);
+    assert_eq!(saved.kv, 4);
 }

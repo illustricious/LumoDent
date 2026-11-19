@@ -27,11 +27,76 @@ pub struct ViewerState {
     thumbs: HashMap<i64, Option<TextureHandle>>,
     /// Millimetres per pixel of the open image, when its file says.
     pub spacing: Option<f64>,
-    /// Measure mode: dragging on the canvas draws a ruler instead of panning.
-    pub measuring: bool,
+    /// What a drag or click on the canvas does.
+    pub tool: Tool,
     /// Rulers in image pixel coordinates, cleared when the image changes.
     pub measures: Vec<[egui::Pos2; 2]>,
-    drawing: Option<[egui::Pos2; 2]>,
+    /// Drawn annotations in image pixel coordinates, cleared with the rulers.
+    pub marks: Vec<Mark>,
+    /// The shape being dragged out (two points, or every point for free drawing).
+    stroke: Vec<egui::Pos2>,
+    /// A memo being typed: where it goes and its text.
+    pub memo_edit: Option<(egui::Pos2, String)>,
+    pub grid: bool,
+    /// Downscaled images for the other cells of a multi-image layout.
+    previews: HashMap<i64, Option<(TextureHandle, [usize; 2])>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tool {
+    #[default]
+    Pan,
+    Measure,
+    Line,
+    Rectangle,
+    Ellipse,
+    Draw,
+    Memo,
+    Magnifier,
+}
+
+impl Tool {
+    /// Tools that draw by dragging from one point to another.
+    fn drags(self) -> bool {
+        matches!(self, Tool::Measure | Tool::Line | Tool::Rectangle | Tool::Ellipse | Tool::Draw)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mark {
+    Line([egui::Pos2; 2]),
+    Rectangle([egui::Pos2; 2]),
+    Ellipse([egui::Pos2; 2]),
+    Draw(Vec<egui::Pos2>),
+    Memo { at: egui::Pos2, text: String },
+}
+
+/// Rows × columns for a layout index of `settings::LAYOUTS` (1x1, 1x2, 2x1, 2x2).
+pub fn layout_grid(index: usize) -> (usize, usize) {
+    match index {
+        1 => (1, 2),
+        2 => (2, 1),
+        3 => (2, 2),
+        _ => (1, 1),
+    }
+}
+
+/// Splits `rect` into `rows × cols` cells with a gap, row by row.
+pub fn cells(rect: Rect, (rows, cols): (usize, usize), gap: f32) -> Vec<Rect> {
+    let w = (rect.width() - gap * (cols as f32 - 1.0)) / cols as f32;
+    let h = (rect.height() - gap * (rows as f32 - 1.0)) / rows as f32;
+    (0..rows)
+        .flat_map(|r| (0..cols).map(move |c| (r, c)))
+        .map(|(r, c)| Rect::from_min_size(rect.min + vec2(c as f32 * (w + gap), r as f32 * (h + gap)), vec2(w, h)))
+        .collect()
+}
+
+fn rgba(c: lumodent::settings::Rgba) -> Color32 {
+    Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])
+}
+
+fn pen(style: lumodent::settings::Stroke) -> egui::Stroke {
+    egui::Stroke::new(style.thickness as f32, rgba(style.color))
 }
 
 pub fn color_image(width: usize, height: usize, pixels: &[u32]) -> ColorImage {
@@ -57,7 +122,9 @@ impl ViewerState {
         self.image = image;
         self.viewport = Viewport::default();
         self.measures.clear();
-        self.drawing = None;
+        self.marks.clear();
+        self.stroke.clear();
+        self.memo_edit = None;
         self.message = message.into();
         self.refresh();
     }
@@ -77,6 +144,7 @@ impl ViewerState {
             f(image);
             self.viewport = Viewport::default();
             self.measures.clear();
+            self.marks.clear();
             self.refresh();
         }
     }
@@ -186,7 +254,9 @@ impl App {
         let center = (canvas.size() / 2.0).to_pos2();
         if pressed(Key::Plus) || pressed(Key::Equals) { self.zoom(1.25, canvas, center); }
         if pressed(Key::Minus) { self.zoom(0.8, canvas, center); }
-        if pressed(Key::M) { self.viewer.measuring = !self.viewer.measuring; }
+        if pressed(Key::M) { self.viewer.tool = if self.viewer.tool == Tool::Measure { Tool::Pan } else { Tool::Measure }; }
+        if pressed(Key::G) { self.viewer.grid = !self.viewer.grid; }
+        if pressed(Key::Escape) { self.viewer.tool = Tool::Pan; self.viewer.memo_edit = None; }
         if pressed(Key::R) { self.viewer.edit(Image::rotate_clockwise); }
         if pressed(Key::L) { self.viewer.edit(Image::rotate_counter_clockwise); }
         if pressed(Key::H) { self.viewer.edit(Image::flip_horizontal); }
@@ -345,15 +415,50 @@ impl App {
                     ui.horizontal(|ui| {
                         let center = canvas.size() / 2.0;
                         for (icon, label, factor) in [(Icon::ZoomOut, t("Zoom Out"), 0.8), (Icon::ZoomIn, t("Zoom In"), 1.25)] {
-                            if icons::button(ui, Some(icon), label, vec2(110.0, 30.0), IconLayout::Inline, has_image, false).clicked() {
+                            if icons::button(ui, Some(icon), label, vec2(34.0, 30.0), IconLayout::IconOnly, has_image, false).clicked() {
                                 self.zoom(factor, canvas, center.to_pos2());
                             }
                         }
-                        let measure = self.viewer.measuring;
-                        if icons::button(ui, Some(Icon::Measure), t("Measure"), vec2(110.0, 30.0), IconLayout::Inline, has_image, measure).clicked() {
-                            self.viewer.measuring = !measure;
+                        ui.add_space(8.0);
+                        let tools = [
+                            (Tool::Pan, Icon::Hand, t("Pan")),
+                            (Tool::Measure, Icon::Measure, t("Measure")),
+                            (Tool::Line, Icon::Line, t("Line")),
+                            (Tool::Rectangle, Icon::Rectangle, t("Rectangle")),
+                            (Tool::Ellipse, Icon::Ellipse, t("Ellipse")),
+                            (Tool::Draw, Icon::Pencil, t("Free Draw")),
+                            (Tool::Memo, Icon::Memo, t("Memo")),
+                            (Tool::Magnifier, Icon::Magnifier, t("Magnifier")),
+                        ];
+                        let small = vec2(34.0, 30.0);
+                        for (tool, icon, label) in tools {
+                            let on = self.viewer.tool == tool;
+                            if icons::button(ui, Some(icon), label, small, IconLayout::IconOnly, has_image, on).clicked() {
+                                // Clicking the active tool goes back to panning.
+                                self.viewer.tool = if on { Tool::Pan } else { tool };
+                                self.viewer.stroke.clear();
+                            }
                         }
-                        ui.add_space(16.0);
+                        let grid = self.viewer.grid;
+                        if icons::button(ui, Some(Icon::Grid), t("Grid"), small, IconLayout::IconOnly, has_image, grid).clicked() {
+                            self.viewer.grid = !grid;
+                        }
+                        let layout = icons::button(ui, Some(Icon::Layout), t("Image Layout"), small, IconLayout::IconOnly, true, self.settings.layout != 0);
+                        egui::Popup::menu(&layout).show(|ui| {
+                            for (i, name) in lumodent::settings::LAYOUTS.iter().enumerate() {
+                                if ui.radio(self.settings.layout == i, *name).clicked() {
+                                    self.settings.layout = i;
+                                    let saved = self.settings.save(&self.ws.data.join("settings.txt"));
+                                    self.check(saved);
+                                }
+                            }
+                        });
+                        let marked = !self.viewer.marks.is_empty() || !self.viewer.measures.is_empty();
+                        if icons::button(ui, Some(Icon::Clear), t("Clear Annotations"), small, IconLayout::IconOnly, marked, false).clicked() {
+                            self.viewer.marks.clear();
+                            self.viewer.measures.clear();
+                        }
+                        ui.add_space(12.0);
                         let mut changed = false;
                         let caption = ui.label(t("Brightness"));
                         changed |= ui.add(egui::Slider::new(&mut self.viewer.brightness, -100..=100).show_value(false)).labelled_by(caption.id).changed();
@@ -381,8 +486,57 @@ impl App {
         }
     }
 
+    /// The image area: one cell per image of the chosen layout. The first cell
+    /// holds the open image with every tool; the others preview the next
+    /// images, and clicking one opens it.
     fn canvas(&mut self, ui: &mut Ui, size: egui::Vec2) -> Rect {
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let (area, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let grid = layout_grid(self.settings.layout);
+        let rects = cells(area, grid, 6.0);
+        let first = self.viewer.current.unwrap_or(0);
+        for (k, cell) in rects.iter().enumerate().skip(1) {
+            self.preview_cell(ui, *cell, first + k);
+        }
+        self.image_cell(ui, rects[0])
+    }
+
+    fn preview(&mut self, ctx: &egui::Context, index: usize) -> Option<(egui::TextureId, [usize; 2])> {
+        let study = self.viewer.studies.get(index)?.clone();
+        let entry = self.viewer.previews.entry(study.pk).or_insert_with(|| {
+            self.ws.load_image(&study).ok().map(|image| {
+                let pixels = thumbnail(&image, 1024);
+                let size = pixels.size;
+                (ctx.load_texture(format!("preview-{}", study.pk), pixels, TextureOptions::LINEAR), size)
+            })
+        });
+        entry.as_ref().map(|(t, s)| (t.id(), *s))
+    }
+
+    fn preview_cell(&mut self, ui: &mut Ui, rect: Rect, index: usize) {
+        let response = ui.interact(rect, ui.scope_id().with(("preview", index)), egui::Sense::click());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, theme::canvas());
+        match self.preview(ui.ctx(), index) {
+            Some((texture, [w, h])) => {
+                let scale = (rect.width() / w as f32).min(rect.height() / h as f32);
+                let dest = Rect::from_center_size(rect.center(), vec2(w as f32 * scale, h as f32 * scale));
+                painter.image(texture, dest, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                painter.text(rect.left_top() + vec2(8.0, 6.0), egui::Align2::LEFT_TOP, format!("{}", index + 1), egui::FontId::proportional(13.0), theme::muted());
+                if response.hovered() {
+                    painter.rect_stroke(rect, 0.0, egui::Stroke::new(2.0, theme::muted()), egui::StrokeKind::Inside);
+                }
+                if response.clicked() {
+                    self.open_study(index);
+                }
+            }
+            None => {
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, t("No image"), egui::FontId::proportional(13.0), theme::muted());
+            }
+        }
+    }
+
+    fn image_cell(&mut self, ui: &mut Ui, rect: Rect) -> Rect {
+        let response = ui.interact(rect, ui.scope_id().with("image-cell"), egui::Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme::canvas());
         let Some(image) = &self.viewer.image else {
@@ -394,30 +548,58 @@ impl App {
         let (x, y, scale) = self.viewer.viewport.place((iw, ih), (rect.width() as i32, rect.height() as i32));
         let origin = rect.min + vec2(x, y);
         let to_image = |p: egui::Pos2| pos2(((p.x - origin.x) / scale).clamp(0.0, iw as f32), ((p.y - origin.y) / scale).clamp(0.0, ih as f32));
-        if self.viewer.measuring {
+        let tool = self.viewer.tool;
+        if tool.drags() {
             if response.drag_started() {
                 if let Some(p) = response.interact_pointer_pos() {
                     let q = to_image(p);
-                    self.viewer.drawing = Some([q, q]);
+                    self.viewer.stroke = vec![q, q];
                 }
             }
-            if let (Some(line), Some(p)) = (&mut self.viewer.drawing, response.interact_pointer_pos()) {
-                line[1] = to_image(p);
+            if let Some(p) = response.interact_pointer_pos().filter(|_| response.dragged() && !self.viewer.stroke.is_empty()) {
+                let q = to_image(p);
+                let s = &mut self.viewer.stroke;
+                if tool == Tool::Draw {
+                    if s.last().is_some_and(|l| l.distance(q) * scale > 2.0) {
+                        s.push(q);
+                    }
+                } else {
+                    s[1] = q;
+                }
             }
             if response.drag_stopped() {
-                if let Some(line) = self.viewer.drawing.take() {
-                    if line[0].distance(line[1]) * scale > 3.0 {
-                        self.viewer.measures.push(line);
+                let s = std::mem::take(&mut self.viewer.stroke);
+                let span = s.first().zip(s.last()).map_or(0.0, |(a, b)| a.distance(*b) * scale);
+                if span > 3.0 || (tool == Tool::Draw && s.len() > 2) {
+                    let pair = [s[0], s[s.len() - 1]];
+                    match tool {
+                        Tool::Measure => self.viewer.measures.push(pair),
+                        Tool::Line => self.viewer.marks.push(Mark::Line(pair)),
+                        Tool::Rectangle => self.viewer.marks.push(Mark::Rectangle(pair)),
+                        Tool::Ellipse => self.viewer.marks.push(Mark::Ellipse(pair)),
+                        Tool::Draw => self.viewer.marks.push(Mark::Draw(s)),
+                        _ => {}
                     }
                 }
             }
-            if response.secondary_clicked() {
-                self.viewer.measures.pop();
+        } else if tool == Tool::Memo {
+            if response.clicked() && self.viewer.memo_edit.is_none() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    self.viewer.memo_edit = Some((to_image(p), String::new()));
+                }
             }
         } else if response.dragged() {
             let d = response.drag_delta();
             self.viewer.viewport.pan.0 += d.x;
             self.viewer.viewport.pan.1 += d.y;
+        }
+        // Right-click removes the last ruler in Measure mode, else the last annotation.
+        if response.secondary_clicked() {
+            if tool == Tool::Measure {
+                self.viewer.measures.pop();
+            } else {
+                self.viewer.marks.pop();
+            }
         }
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
@@ -438,18 +620,73 @@ impl App {
         }
         let (x, y, scale) = self.viewer.viewport.place((iw, ih), (rect.width() as i32, rect.height() as i32));
         let dest = Rect::from_min_size(rect.min + vec2(x, y), vec2(iw as f32 * scale, ih as f32 * scale));
+        let full_uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         if let Some(t) = &self.viewer.texture {
-            painter.image(t.id(), dest, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            painter.image(t.id(), dest, full_uv, Color32::WHITE);
         }
+        let to_screen = |q: egui::Pos2| dest.min + q.to_vec2() * scale;
         // Millimetres per pixel: the image's own spacing, else the calibration setting.
         let mm_per_px = self.settings.mm_per_pixel(self.viewer.spacing);
-        let style = self.settings.length;
-        let show_unit = self.settings.length_unit;
-        let to_screen = |q: egui::Pos2| dest.min + q.to_vec2() * dest.width() / iw as f32;
-        for line in self.viewer.measures.iter().chain(self.viewer.drawing.iter()) {
+        let st = &self.settings;
+
+        if self.viewer.grid {
+            use lumodent::settings::{GRID_MM, GRID_OPACITY};
+            let step = GRID_MM[st.grid_mm] as f64 / mm_per_px * scale as f64;
+            if step >= 4.0 {
+                let alpha = (GRID_OPACITY[st.grid_opacity] as f32 / 100.0 * 255.0) as u8;
+                let [r, g, b, _] = st.grid.color;
+                let line = egui::Stroke::new(st.grid.thickness as f32, Color32::from_rgba_unmultiplied(r, g, b, alpha));
+                let mut gx = dest.left() as f64;
+                while gx <= dest.right() as f64 {
+                    painter.line_segment([pos2(gx as f32, dest.top()), pos2(gx as f32, dest.bottom())], line);
+                    gx += step;
+                }
+                let mut gy = dest.top() as f64;
+                while gy <= dest.bottom() as f64 {
+                    painter.line_segment([pos2(dest.left(), gy as f32), pos2(dest.right(), gy as f32)], line);
+                    gy += step;
+                }
+            }
+        }
+
+        let preview_mark = match (tool, self.viewer.stroke.as_slice()) {
+            (Tool::Line, [a, b]) => Some(Mark::Line([*a, *b])),
+            (Tool::Rectangle, [a, b]) => Some(Mark::Rectangle([*a, *b])),
+            (Tool::Ellipse, [a, b]) => Some(Mark::Ellipse([*a, *b])),
+            (Tool::Draw, s) if s.len() > 1 => Some(Mark::Draw(s.to_vec())),
+            _ => None,
+        };
+        for mark in self.viewer.marks.iter().chain(preview_mark.iter()) {
+            match mark {
+                Mark::Line([a, b]) => {
+                    painter.line_segment([to_screen(*a), to_screen(*b)], pen(st.line));
+                }
+                Mark::Rectangle([a, b]) => {
+                    painter.rect_stroke(Rect::from_two_pos(to_screen(*a), to_screen(*b)), 0.0, pen(st.rectangle), egui::StrokeKind::Middle);
+                }
+                Mark::Ellipse([a, b]) => {
+                    let r = Rect::from_two_pos(to_screen(*a), to_screen(*b));
+                    painter.add(egui::epaint::EllipseShape::stroke(r.center(), r.size() / 2.0, pen(st.ellipse)));
+                }
+                Mark::Draw(points) => {
+                    painter.add(egui::Shape::line(points.iter().map(|q| to_screen(*q)).collect(), pen(st.draw)));
+                }
+                Mark::Memo { at, text } => {
+                    let galley = painter.layout(text.clone(), egui::FontId::proportional(14.0), rgba(st.memo_text), 320.0);
+                    let at = to_screen(*at);
+                    let bg = Rect::from_min_size(at, galley.size()).expand(5.0);
+                    painter.rect_filled(bg, 4.0, rgba(st.memo_outer));
+                    painter.galley(at, galley, rgba(st.memo_text));
+                }
+            }
+        }
+
+        let style = st.length;
+        let show_unit = st.length_unit;
+        let measuring = if tool == Tool::Measure { self.viewer.stroke.first().zip(self.viewer.stroke.last()).map(|(a, b)| [*a, *b]) } else { None };
+        for line in self.viewer.measures.iter().chain(measuring.iter()) {
             let (a, b) = (to_screen(line[0]), to_screen(line[1]));
-            let [r, g, bl, al] = style.color;
-            let ruler = Color32::from_rgba_unmultiplied(r, g, bl, al);
+            let ruler = rgba(style.color);
             let width = style.thickness as f32;
             painter.line_segment([a, b], egui::Stroke::new(width + 1.5, Color32::from_black_alpha(160)));
             painter.line_segment([a, b], egui::Stroke::new(width, ruler));
@@ -463,8 +700,31 @@ impl App {
             painter.rect_filled(bg, 3.0, Color32::from_black_alpha(170));
             painter.galley(bg.min + vec2(3.0, 3.0), galley, ruler);
         }
-        if self.viewer.measuring {
-            ui.ctx().set_cursor_icon(if response.hovered() { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default });
+
+        // Magnifier: a square lens under the pointer showing the image enlarged.
+        if tool == Tool::Magnifier {
+            if let (Some(p), Some(t)) = (response.hover_pos(), &self.viewer.texture) {
+                use lumodent::settings::{MAGNIFIER_RATIOS, MAGNIFIER_SIZES};
+                let side = MAGNIFIER_SIZES[st.magnifier_size] as f32;
+                let ratio = MAGNIFIER_RATIOS[st.magnifier_ratio];
+                let q = to_image(p);
+                let half = side / 2.0 / (scale * ratio);
+                let uv = Rect::from_min_max(pos2((q.x - half) / iw as f32, (q.y - half) / ih as f32), pos2((q.x + half) / iw as f32, (q.y + half) / ih as f32));
+                let lens = Rect::from_center_size(p, vec2(side, side));
+                painter.rect_filled(lens, 0.0, theme::canvas());
+                painter.image(t.id(), lens, uv, Color32::WHITE);
+                painter.rect_stroke(lens, 0.0, egui::Stroke::new(2.0, rgba(st.capture_border)), egui::StrokeKind::Outside);
+            }
+        }
+
+        let cursor = match tool {
+            Tool::Pan => None,
+            Tool::Memo => Some(egui::CursorIcon::Text),
+            Tool::Magnifier => Some(egui::CursorIcon::None),
+            _ => Some(egui::CursorIcon::Crosshair),
+        };
+        if let (Some(c), true) = (cursor, response.hovered()) {
+            ui.ctx().set_cursor_icon(c);
         }
         painter.text(
             rect.right_bottom() - vec2(8.0, 6.0),
@@ -473,6 +733,56 @@ impl App {
             egui::FontId::proportional(12.0),
             theme::muted(),
         );
+        let memo_at = self.viewer.memo_edit.as_ref().map(|(q, _)| dest.min + q.to_vec2() * scale);
+        self.memo_editor(ui.ctx(), memo_at);
         rect
+    }
+
+    /// The memo box: a text field, the preset texts from Settings, OK and Cancel.
+    fn memo_editor(&mut self, ctx: &egui::Context, at: Option<egui::Pos2>) {
+        let (Some(at), Some((_, text))) = (at, self.viewer.memo_edit.as_mut()) else { return };
+        let presets: Vec<String> = self.settings.memo_presets.iter().filter(|p| !p.trim().is_empty()).cloned().collect();
+        let mut done = None;
+        egui::Area::new(egui::Id::unique("memo-editor")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
+            theme::panel_frame().show(ui, |ui| {
+                ui.set_width(260.0);
+                let caption = ui.label(t("Memo"));
+                let edit = ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(250.0)).labelled_by(caption.id);
+                if text.is_empty() && !edit.has_focus() {
+                    edit.request_focus();
+                }
+                if !presets.is_empty() {
+                    ui.label(egui::RichText::new(t("Quick Text")).small().weak());
+                    ui.horizontal_wrapped(|ui| {
+                        for p in &presets {
+                            if ui.small_button(p).clicked() {
+                                if !text.is_empty() && !text.ends_with(' ') {
+                                    text.push(' ');
+                                }
+                                text.push_str(p);
+                            }
+                        }
+                    });
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(t("Add Memo")).clicked() {
+                        done = Some(true);
+                    }
+                    if ui.button(t("Cancel")).clicked() {
+                        done = Some(false);
+                    }
+                });
+            });
+        });
+        match done {
+            Some(true) => {
+                let (at, text) = self.viewer.memo_edit.take().unwrap();
+                if !text.trim().is_empty() {
+                    self.viewer.marks.push(Mark::Memo { at, text: text.trim().to_string() });
+                }
+            }
+            Some(false) => self.viewer.memo_edit = None,
+            None => {}
+        }
     }
 }
