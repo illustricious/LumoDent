@@ -575,7 +575,7 @@ mod tests {
     /// (through Node's zlib) when the NanoPix sample folder is present.
     #[test]
     fn matches_reference_when_samples_exist() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../PatientData");
+        let Some(dir) = crate::iosm::sample_dir() else { return };
         let Ok(entries) = std::fs::read_dir(&dir) else { return };
         for e in entries.flatten().filter(|e| e.path().is_dir()) {
             for f in std::fs::read_dir(e.path()).unwrap().flatten() {
@@ -588,3 +588,4 @@ mod tests {
         }
     }
 }
+
