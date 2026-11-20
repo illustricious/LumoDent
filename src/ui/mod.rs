@@ -130,6 +130,7 @@ pub struct App {
     ctx: Option<egui::Context>,
     pub hooks: Hooks,
     left_width: f32,
+    pub(crate) capture: acquisition::Capture,
 }
 
 impl App {
@@ -152,6 +153,7 @@ impl App {
             ctx: None,
             hooks,
             left_width: 180.0,
+            capture: Default::default(),
         };
         let loaded = app.refresh_patients();
         app.check(loaded);

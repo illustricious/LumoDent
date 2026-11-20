@@ -78,6 +78,18 @@ pub trait Transport {
     fn bulk_in(&mut self, len: usize, timeout_ms: u32) -> Option<Vec<u8>>;
 }
 
+impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn control_in(&mut self, request: u8, len: usize) -> Option<Vec<u8>> {
+        (**self).control_in(request, len)
+    }
+    fn control_out(&mut self, request: u8, data: &[u8]) -> bool {
+        (**self).control_out(request, data)
+    }
+    fn bulk_in(&mut self, len: usize, timeout_ms: u32) -> Option<Vec<u8>> {
+        (**self).bulk_in(len, timeout_ms)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeviceInfo {
     pub product: u16,
@@ -665,4 +677,29 @@ mod tests {
         let usb = s.close();
         assert_eq!(usb.log.iter().filter(|e| **e == ('o', req::POWER_OFF)).count(), 1);
     }
+}
+
+/// Turns a frame from [`Sensor::load_raw_image`] (big-endian 16-bit) into a
+/// displayable radiograph. With the sensor's calibration files in
+/// `calibration` (`<serial>_Offset Image0`, ... as NanoPix ships them) the
+/// HDR correction runs first. Higher counts mean more dose, so they are shown
+/// dark; the window spans the 0.5th to 99.5th percentile.
+pub fn frame_to_image(raw: &[u8], width: usize, height: usize, calibration: Option<(&std::path::Path, &str)>) -> crate::image::Image {
+    let mut px: Vec<u16> = raw.chunks_exact(2).take(width * height).map(|b| u16::from_be_bytes([b[0], b[1]])).collect();
+    px.resize(width * height, 0);
+    if let Some((dir, serial)) = calibration {
+        let _ = crate::hdr::correct_image(&mut px, width, height, dir, serial, true);
+    }
+    let mut sorted = px.clone();
+    sorted.sort_unstable();
+    let at = |q: f64| sorted.get(((sorted.len().max(1) - 1) as f64 * q) as usize).copied().unwrap_or(0) as f64;
+    let (lo, hi) = (at(0.005), at(0.995).max(at(0.005) + 1.0));
+    let pixels = px
+        .iter()
+        .map(|&v| {
+            let n = ((v as f64 - lo) / (hi - lo)).clamp(0.0, 1.0);
+            ((255.0 - n * 255.0).round() as u32) * 0x010101
+        })
+        .collect();
+    crate::image::Image { width, height, pixels }
 }

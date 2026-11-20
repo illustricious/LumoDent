@@ -283,3 +283,21 @@ Images are looked up in LumoDent's folder, then by name under the NanoPix data
 folder. Where NanoPix itself stores image files is not confirmed yet (the
 sample install has no images). Driver INF: VID 04B4, PID 0042-0046, 8613
 for an unprogrammed FX2 (`usb_sensor.rs`).
+
+## Sensor link, simulator, auto-detect
+
+- `src/cyusb.rs`: talks to the installed NanoPix driver (a CyUSB build,
+  interface {AE18AA60-7F6A-11d4-97DD-00010229B959}) with SetupAPI and
+  overlapped DeviceIoControl, using the SINGLE_TRANSFER layout and IOCTLs
+  0x220020 (endpoint 0) / 0x220024 (bulk) read from sensor_io.dll's CyAPI.
+  Reads the device and configuration descriptors for the USB IDs and the bulk
+  IN endpoint. Not yet tried with a sensor.
+- `src/simulator.rs`: a NanoPix-E (1200x1600, newer line format, 14-bit) that
+  answers the sensor_io protocol and returns a tooth phantom.
+- Acquisition screen: searches every 2 s and connects to the first sensor by
+  itself; shows device type, serial, firmware, USB ID, resolution, bit depth
+  and HDR; captured frames are corrected (HDR files in `<data>/calibration`
+  when present), windowed and saved as studies. "Use Simulator" for testing.
+- Gender is a Male/Female choice, as in the reference.
+- New tooth mark (`src/logo.rs`) for the window, in-app logo, Linux SVG and the
+  .exe file icon (build.rs writes a .ico and links it with llvm-windres).

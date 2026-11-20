@@ -171,6 +171,15 @@ impl Workspace {
         }
     }
 
+    /// Stores a captured radiograph for the patient, like an imported PNG.
+    pub fn save_capture(&self, patient: &Patient, image: &Image) -> Result<Study, String> {
+        let tmp = self.data.join(format!("capture-{}.png", nanos()));
+        image.save_png(&tmp)?;
+        let study = self.import_image(patient, &tmp);
+        let _ = std::fs::remove_file(&tmp);
+        study
+    }
+
     pub fn load_image(&self, study: &Study) -> Result<Image, String> {
         self.load_study_image(study).map(|(image, _)| image)
     }

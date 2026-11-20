@@ -20,6 +20,37 @@ pub const FIELDS: [&str; 11] = [
     "Address",
 ];
 
+/// Index of "Gender" in FIELDS.
+const GENDER: usize = 3;
+/// The reference's Gender choices (NanoPix.exe string table: "Gender", "Male",
+/// "Female"); empty means not given.
+pub const GENDERS: [&str; 3] = ["", "Male", "Female"];
+
+/// A Gender dropdown. A value from older data that is not one of the choices
+/// ("M", "F", free text) is kept and shown as it is.
+fn gender_combo(ui: &mut Ui, value: &mut String) -> egui::Response {
+    match value.trim() {
+        "M" | "m" | "male" => *value = "Male".into(),
+        "F" | "f" | "female" => *value = "Female".into(),
+        _ => {}
+    }
+    let shown = |v: &str| match v {
+        "" => "-".to_string(),
+        "Male" => t("Male").to_string(),
+        "Female" => t("Female").to_string(),
+        other => other.to_string(),
+    };
+    egui::ComboBox::from_id_salt("gender")
+        .width(168.0)
+        .selected_text(shown(value))
+        .show_ui(ui, |ui| {
+            for g in GENDERS {
+                ui.selectable_value(value, g.to_string(), shown(g));
+            }
+        })
+        .response
+}
+
 pub const DATES: [&str; 9] = [
     "All Dates",
     "Yesterday",
@@ -323,7 +354,11 @@ impl App {
                         let caption = ui.label(t(label));
                         // Fixed size: a Grid measures columns on its first pass.
                         let enabled = !(editing && i == 0);
-                        let field = ui.add_enabled_ui(enabled, |ui| ui.add_sized([180.0, 26.0], egui::TextEdit::singleline(&mut editor.fields[i]))).inner;
+                        let field = if i == GENDER {
+                            gender_combo(ui, &mut editor.fields[i])
+                        } else {
+                            ui.add_enabled_ui(enabled, |ui| ui.add_sized([180.0, 26.0], egui::TextEdit::singleline(&mut editor.fields[i]))).inner
+                        };
                         field.labelled_by(caption.id);
                         if i % 2 == 1 {
                             ui.end_row();

@@ -63,24 +63,11 @@ fn open_workspace(data: PathBuf) -> Result<Workspace, String> {
     Ok(ws)
 }
 
-/// The window icon: the same crescent-over-disc mark as the in-app logo.
+/// The window icon: the tooth mark on its dark disc (src/logo.rs).
 fn window_icon() -> egui::IconData {
+    use lumodent::logo;
     const N: usize = 64;
-    let mut rgba = vec![0u8; N * N * 4];
-    let inside = |x: f32, y: f32, cx: f32, cy: f32, r: f32| (x - cx).powi(2) + (y - cy).powi(2) <= r * r;
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let px = &mut rgba[(y * N + x) * 4..][..4];
-            if inside(fx, fy, 32.0, 32.0, 30.0) {
-                px.copy_from_slice(&[0x2c, 0x34, 0x3e, 0xff]);
-                if inside(fx, fy, 32.0, 34.0, 20.0) && !inside(fx, fy, 38.0, 28.0, 17.0) {
-                    px.copy_from_slice(&[0x8f, 0xb8, 0xe0, 0xff]);
-                }
-            }
-        }
-    }
-    egui::IconData { rgba, width: N as u32, height: N as u32 }
+    egui::IconData { rgba: logo::render(N, true, logo::TOP, logo::BOTTOM), width: N as u32, height: N as u32 }
 }
 
 fn main() -> eframe::Result {

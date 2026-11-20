@@ -349,13 +349,29 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, color: Color32) {
     }
 }
 
-/// The LumoDent mark: a crescent of light over a disc, the name and the developer.
+/// The tooth mark, rendered once per colour pair and kept as a texture.
+fn tooth_texture(ctx: &egui::Context, top: egui::Color32, bottom: egui::Color32) -> egui::TextureHandle {
+    let id = egui::Id::unique(("lumodent-tooth", top, bottom));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    const N: usize = 96;
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    let rgba = lumodent::logo::render(N, false, rgb(top), rgb(bottom));
+    let image = egui::ColorImage::from_rgba_unmultiplied([N, N], &rgba);
+    let t = ctx.load_texture("lumodent-tooth", image, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// The LumoDent mark: a lit molar, the name and the developer.
 pub fn logo(ui: &mut Ui, size: Vec2) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let p = ui.painter_at(rect);
-    let c = pos2(rect.center().x, rect.top() + 24.0);
-    p.circle_filled(c, 19.0, theme::accent());
-    p.circle_filled(c + vec2(5.0, -4.0), 16.0, theme::back());
+    let c = pos2(rect.center().x, rect.top() + 22.0);
+    let tex = tooth_texture(ui.ctx(), theme::accent_light(), theme::accent());
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    p.image(tex.id(), Rect::from_center_size(c, vec2(44.0, 44.0)), uv, egui::Color32::WHITE);
     let font = FontId::proportional(26.0);
     let lumo = p.layout_no_wrap("Lumo".into(), font.clone(), theme::text());
     let dent = p.layout_no_wrap("Dent".into(), font, theme::accent_light());

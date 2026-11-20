@@ -493,3 +493,42 @@ fn viewer_tools_grid_layout_memo_and_generator() {
     assert!(saved.generator_ac);
     assert_eq!(saved.kv, 4);
 }
+
+#[test]
+fn simulator_capture_saves_an_image() {
+    let (mut h, _env) = start("sim");
+    add_patient(&mut h, "P-21", "Sari", "Dewi");
+    click(&mut h, "Acquisition");
+    click(&mut h, "Use Simulator");
+    let wait = |h: &mut Harness<'static, App>, done: &dyn Fn(&App) -> bool| {
+        for _ in 0..300 {
+            if done(h.state()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            h.run();
+        }
+        panic!("timed out: {}", h.state().capture.status);
+    };
+    wait(&mut h, &|a| a.capture.connected.is_some());
+    let d = h.state().capture.details.clone().unwrap();
+    assert_eq!((d.serial.as_str(), d.width, d.height, d.bits, d.usb), ("99000001", 1200, 1600, 14, None));
+    assert!(d.model.starts_with("NanoPix-E"));
+    assert!(h.query_all_by_label_contains("99000001").count() >= 2, "serial shown in the title and the details");
+    if let Some(dir) = std::env::var_os("LUMODENT_SHOT") {
+        h.run();
+        h.render().unwrap().save(std::path::Path::new(&dir).join("16-acquisition-simulator.png")).unwrap();
+    }
+    click(&mut h, "Simulate Exposure");
+    wait(&mut h, &|a| a.capture.captured == 1);
+    let patient = h.state().patients.selected_patient().cloned().unwrap();
+    let studies = h.state().ws.studies(&patient).unwrap();
+    assert_eq!(studies.len(), 1);
+    let image = h.state().ws.load_image(&studies[0]).unwrap();
+    assert_eq!((image.width, image.height), (1200, 1600));
+    // Open field is shown dark, the teeth light.
+    let at = |x: usize, y: usize| image.pixels[y * 1200 + x] & 0xff;
+    assert!(at(20, 20) < 60 && at(420, 560) > 150, "air {} tooth {}", at(20, 20), at(420, 560));
+    click(&mut h, "Disconnect");
+    assert!(!h.state().capture.running());
+}
