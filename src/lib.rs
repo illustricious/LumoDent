@@ -8,6 +8,7 @@ pub mod dates;
 pub mod dicom;
 pub mod hdr;
 pub mod image;
+pub mod nanopix;
 pub mod patients;
 pub mod pdf;
 pub mod processing;

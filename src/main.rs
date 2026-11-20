@@ -38,6 +38,31 @@ fn data_dir() -> Result<PathBuf, String> {
     }
 }
 
+/// Opens the data folder. When LumoDent is first installed on a PC that has
+/// the original NanoPix, NanoPix's databases are used from then on (unless
+/// `LUMODENT_DATA` is set), and its preferences and clinic details are copied
+/// into LumoDent's files. A PC where LumoDent already has its own database
+/// keeps using it.
+fn open_workspace(data: PathBuf) -> Result<Workspace, String> {
+    let marker = data.join("nanopix-data.txt");
+    let own_db = data.join("patients.sqlite3").exists() && !marker.exists();
+    let install = (std::env::var_os("LUMODENT_DATA").is_none() && !own_db)
+        .then(lumodent::nanopix::ini_path)
+        .flatten()
+        .and_then(|ini| lumodent::nanopix::detect(&ini));
+    let Some(install) = install else { return Workspace::open(data) };
+    let ws = Workspace::open_nanopix(data, &install)?;
+    std::fs::write(&marker, install.data.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let settings = ws.data.join("settings.txt");
+    if !settings.exists() {
+        lumodent::nanopix::import_settings(&install).save(&settings)?;
+        if ws.load_clinic().name.is_empty() {
+            ws.save_clinic(&lumodent::nanopix::import_clinic(&install))?;
+        }
+    }
+    Ok(ws)
+}
+
 /// The window icon: the same crescent-over-disc mark as the in-app logo.
 fn window_icon() -> egui::IconData {
     const N: usize = 64;
@@ -59,7 +84,7 @@ fn window_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
-    let workspace = data_dir().and_then(Workspace::open);
+    let workspace = data_dir().and_then(open_workspace);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)

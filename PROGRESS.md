@@ -270,3 +270,16 @@ offset, high-byte bias 8; newer: 0xAA sync, inverted 7+7-bit pixels, HDR and
 12/14/16-bit variants, binning, corner chamfers), integration time, binning,
 HDR value. Tested against a fake USB transport only. Not done: a WinUSB
 transport for the real device and the device's VID/PID (in the driver .inf).
+
+## Reading an existing NanoPix installation
+
+`src/nanopix.rs`: NanoPix keeps preferences in `%APPDATA%\NanoPix\NanoPix.ini`
+and its databases in `<Patient Data Directory>\database\NanoPix.db3` and
+`User.db3` (default `D:\PatientData`), with the same tables LumoDent uses.
+On a fresh LumoDent install on such a PC, the NanoPix databases are opened in
+place (the user database is not seeded, so NanoPix's own login keeps
+working), and the INI's preferences and clinic details are imported once.
+Images are looked up in LumoDent's folder, then by name under the NanoPix data
+folder. Where NanoPix itself stores image files is not confirmed yet (the
+sample install has no images). Driver INF: VID 04B4, PID 0042-0046, 8613
+for an unprogrammed FX2 (`usb_sensor.rs`).

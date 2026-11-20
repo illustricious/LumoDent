@@ -7,6 +7,14 @@
 //! a WinUSB transport for the real sensor still has to be written and tried
 //! with the hardware.
 
+/// Cypress vendor ID from the driver's IntraoralImagingSensor.inf.
+pub const VENDOR_ID: u16 = 0x04B4;
+/// Product IDs the driver binds; sensor_io accepts these as the product
+/// field of DEVICE_INFO.
+pub const PRODUCT_IDS: [u16; 5] = [0x0042, 0x0043, 0x0044, 0x0045, 0x0046];
+/// An FX2 chip that has not received its firmware yet.
+pub const UNPROGRAMMED_FX2: u16 = 0x8613;
+
 /// Vendor request codes used by sensor_io.dll.
 pub mod req {
     /// IN, 20 bytes: product, width, height, serial.

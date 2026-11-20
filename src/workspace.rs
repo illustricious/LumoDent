@@ -17,10 +17,26 @@ pub struct Workspace {
     /// The reference's separate user database: products, sign-in users, cloud accounts.
     pub users: UserStore,
     pub data: PathBuf,
+    /// An original NanoPix data folder whose databases are in use; images
+    /// that are not in LumoDent's folder are looked up there.
+    pub legacy: Option<PathBuf>,
 }
 
 fn io(e: std::io::Error) -> String {
     e.to_string()
+}
+
+/// Collects files called `name` under `dir`, up to `depth` folders down.
+fn find_files(dir: &Path, name: &std::ffi::OsStr, depth: usize, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() && depth > 0 => find_files(&p, name, depth - 1, out),
+            Ok(t) if t.is_file() && p.file_name() == Some(name) => out.push(p),
+            _ => {}
+        }
+    }
 }
 
 /// Removes a folder, treating one that is already gone as removed.
@@ -36,7 +52,43 @@ impl Workspace {
         std::fs::create_dir_all(&data).map_err(io)?;
         let store = PatientStore::open(&data.join("patients.sqlite3"))?;
         let users = UserStore::open(&data.join("users.sqlite3"))?;
-        Ok(Self { store, users, data })
+        Ok(Self { store, users, data, legacy: None })
+    }
+
+    /// Uses an existing NanoPix installation's databases; LumoDent's own
+    /// files (settings, new images, reports) stay in `data`.
+    pub fn open_nanopix(data: PathBuf, install: &crate::nanopix::Install) -> Result<Self, String> {
+        std::fs::create_dir_all(&data).map_err(io)?;
+        let store = PatientStore::open(&install.main_db())?;
+        let users = UserStore::open_shared(&install.user_db())?;
+        Ok(Self { store, users, data, legacy: Some(install.data.clone()) })
+    }
+
+    /// Where a study's file is: LumoDent's image folder, a path stored as
+    /// is, or (for NanoPix data) the first file of that name found in the
+    /// NanoPix data folder, preferring one under a folder named after the patient.
+    pub fn image_path(&self, study: &Study) -> PathBuf {
+        let own = self.image_dir(&study.patient_id).join(&study.image_name);
+        if own.is_file() {
+            return own;
+        }
+        let stored = PathBuf::from(&study.image_name);
+        if stored.is_absolute() && stored.is_file() {
+            return stored;
+        }
+        if let Some(root) = &self.legacy {
+            let name = std::path::Path::new(&study.image_name).file_name().map(|n| n.to_os_string());
+            if let Some(name) = name {
+                let mut found = Vec::new();
+                find_files(root, &name, 5, &mut found);
+                let id = folder_name(&study.patient_id);
+                let pick = found.iter().find(|p| p.components().any(|c| c.as_os_str() == id.as_str())).or(found.first());
+                if let Some(p) = pick {
+                    return p.clone();
+                }
+            }
+        }
+        own
     }
 
     pub fn image_dir(&self, patient_id: &str) -> PathBuf {
@@ -125,7 +177,7 @@ impl Workspace {
 
     /// The image and, for DICOM files that state it, millimetres per pixel.
     pub fn load_study_image(&self, study: &Study) -> Result<(Image, Option<f64>), String> {
-        let path = self.image_dir(&study.patient_id).join(&study.image_name);
+        let path = self.image_path(study);
         let bytes = std::fs::read(&path).map_err(|e| format!("Cannot open {}: {e}", study.image_name))?;
         if crate::dicom::is_dicom(&bytes) {
             let d = crate::dicom::parse(&bytes)?;
@@ -136,7 +188,7 @@ impl Workspace {
 
     pub fn remove_study(&self, study: &Study) -> Result<(), String> {
         self.store.remove_study(study.pk)?;
-        let path = self.image_dir(&study.patient_id).join(&study.image_name);
+        let path = self.image_path(study);
         match std::fs::remove_file(&path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 Err(format!("Fail to delete the image file {}: {e}", path.display()))

@@ -127,6 +127,13 @@ impl UserStore {
         Self::connect(":memory:")
     }
 
+    /// Opens another program's user database as it is, without adding the
+    /// default admin (NanoPix seeds its own, in plain text, and would no
+    /// longer recognise a hashed one).
+    pub fn open_shared(path: &Path) -> Result<Self, String> {
+        Ok(Self(PatientStore::connect(path.to_str().ok_or("Invalid UTF-8 database path")?, &SCHEMA, USER_DB_VERSION)?))
+    }
+
     fn connect(filename: &str) -> Result<Self, String> {
         let store = Self(PatientStore::connect(filename, &SCHEMA, USER_DB_VERSION)?);
         if store.users()?.is_empty() {
