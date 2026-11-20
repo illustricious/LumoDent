@@ -88,6 +88,14 @@ fn main() -> eframe::Result {
             .with_decorations(false)
             .with_resizable(true)
             .with_icon(window_icon()),
+        // Without vsync waits: while Windows moves or resizes the window, the
+        // app draws on the same thread as the move loop, and blocking in a
+        // vsync present made dragging stutter on high-refresh screens. The UI
+        // only redraws on input, so this does not spin the GPU when idle.
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig {
+            present_mode: eframe::wgpu::PresentMode::AutoNoVsync,
+            desired_maximum_frame_latency: Some(1),
+        }),
         ..Default::default()
     };
     eframe::run_native(

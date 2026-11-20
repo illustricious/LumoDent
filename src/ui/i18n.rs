@@ -172,7 +172,7 @@ pub fn t(en: &'static str) -> &'static str {
         "Resolution" => "Resolusi",
         "Bit depth" => "Kedalaman bit",
         "HDR" => "HDR",
-        "Searching for a NanoPix-E sensor through its driver (USB 04B4:0042-0046). It connects by itself once plugged in." => "Mencari sensor NanoPix-E lewat drivernya (USB 04B4:0042-0046). Sensor akan tersambung sendiri begitu dicolokkan.",
+        "Searching for a sensor. It connects by itself once plugged in." => "Mencari sensor. Sensor akan tersambung sendiri begitu dicolokkan.",
         "Connecting..." => "Menghubungkan...",
         "Simulator" => "Simulator",
         "The sensor did not answer." => "Sensor tidak merespons.",

@@ -7,6 +7,7 @@ pub const DEVELOPER: &str = "illustricious";
 pub mod cyusb;
 pub mod dates;
 pub mod dicom;
+pub mod finnoray;
 pub mod hdr;
 pub mod image;
 pub mod iosm;

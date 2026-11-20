@@ -318,3 +318,174 @@ into a runnable binary here, and none of the USB paths has met a sensor yet.
 - NanoPix studies store `image_name` without extension and `image_type` "IOSM"; files are `<data>\<patient id>\<name>.iosm`.
 - Settings → General → "NanoPix Data Folder": choose a NanoPix data folder by hand (e.g. copied from another PC, or when the INI points to a missing drive). Remembered in `nanopix-data.txt`, read before the INI on start.
 - Sensor names: NanoPix-E by product 0x44; NanoPix 1 / 1.5 / 2 by reported frame size (nearest model).
+
+## Sensor families and generator settings (mapped, not yet rewritten)
+
+NanoPix 1.1.1.9 drives two sensor families:
+
+1. **NanoPix-E**: sensor_io.dll over the CyUSB driver (USB 04B4:0042-0046). Rewritten in src/usb_sensor.rs and src/usb/.
+2. **NanoPix 1 / 1.5 / 2**: IOSensorAcquisition.dll class `CFinnoRay`, on top of the vendor flat-panel SDK FpdSys.dll / E4S.dll (2 MB, Winsock plus dynamically loaded transports, OpenSSL inside). ConnUSBfifo.dll (FTDI D2XX) is also shipped. **Not rewritten.**
+
+Generator settings (INI `[Acquisition]`: `Trigger Mode=DC|AC`, `Generator KV=70`, `Generator MA=1.0`) only feed CFinnoRay:
+
+- NanoPix.exe FUN_004f6970 calls `AcqImageEx(img, delay, triggerMode, threshold)`:
+  - DC (0x715078 == 0): delay 1000, triggerMode 6.
+  - AC: delay 1500, triggerMode 7.
+- The threshold comes from FUN_004fc420(mode, kvIndex @0x715080, maIndex @0x715084):
+  - DC: `kv >= 2 && ma == 4 ? 6 : ma + 1`.
+  - AC: `ma == 2 ? 6 : ma + 3`.
+  - The indices are radio positions: kV has 4 radios (rdoC3..rdoC6); there are separate mA radio lists for DC and AC. Their displayed values are not mapped yet.
+- AcqImageEx writes SDK attributes:
+  - 0x9ce: delay (clamped to ≥ 0).
+  - 0x9ca: trigger mode (6 or 7 only).
+  - 0xa04: trigger threshold.
+- It then sends SDK command 6 (0x20000, 2000 ms) and command 0x7ef (write user RAM, 1000 ms), and waits for the image.
+- Post-processing: gain correction, bad-pixel fix, and a 1000-pixel histogram clip (upper bound ≥ 20001, lower bound ≤ 199).
+
+### NanoPix 1/1.5/2 SDK: stack and wire format (mapping in progress)
+
+**Stack**
+
+- `IOSensorAcquisition.dll` (CFinnoRay) loads `FpdSys.dll` at runtime and calls its iRay-style C API: `Create`, `GetAttr`, `SetAttr`, `Invoke`, `Abort`, `GetErrInfo`.
+- `FpdSys.dll` is the core. It loads the detector plugin `"%s.dll"`, here `E4S.dll`, which exports `CreateDetectorObj` and `DestroyDetectorObj` and holds class `CDetectorE4`.
+- `E4S.dll` talks through a connection plugin. Shipped: `ConnUSBfifo.dll`, which exports `CreateFpdConnectionObj` and has FTDI D2XX statically linked (FT_Read/FT_Write, device opened by serial number). So the transport is **FTDI USB in FIFO mode**: VID 0403, ftdibus driver on Windows, plain usbfs bulk on Linux.
+- E4S also imports WS2_32, wlanapi and IPHLPAPI, so the same protocol may also run over Ethernet/Wi-Fi.
+- The SDK work folder `calibration13/` belongs to serial 12090806, a **NanoPix-E**. The FinnoRay family has no calibration on this PC.
+
+**Packet magics** (u16 LE at offset 0; dispatcher at E4S FUN_10013b20)
+
+- `0xAB55`: command, ACK or push.
+- `0xAB66`: image data packet (u16 frame no. @4, u16 packet no. @10, data @0x10).
+- `0xAB67`: response with a payload.
+- `0xAB11`, `0xAB22`, `0xAB23`: other notifications.
+- `0xABEE`: trigger-threshold table dump (written to TriggerThreshold.txt).
+
+**Command packet** (built in a 0x5C0 = 1472-byte buffer, i.e. the UDP payload MTU)
+
+| Offset | Content |
+|---|---|
+| 0–3 | `55 AB 00 00` |
+| 4 | `55` |
+| 5–6 | length, big-endian = param count + 3 |
+| 7 | sequence number (per connection; increments, wraps 0xFF → 2) |
+| 8 | 0 |
+| 9 | command code (e.g. 0xE5 byte-parameter, 0x7F write DR config) |
+| 10..10+n−1 | parameters |
+| 10+n | checksum byte (virtual; 0 for the classes checked so far) |
+| 11+n | `AA` |
+
+Total length on the wire = n + 12.
+
+- ACK and push packets: if byte 2 == 0xA5 (extended header), the command echo is at byte 9, else at byte 10. The ACK code follows.
+- Send path: E4S FUN_1001c4a0. Commands 2, 6 and 0x22 wait for a connection-level flush; 0x2D, 0x30, 0x60, 0x68 and 0x6A are sent without waiting for an ACK.
+
+**Still to map**
+
+1. FpdSys attribute IDs (0x9CA, 0x9CE, 0xA04, …) → E4S commands.
+2. Command codes for connect, init, read ROM/RAM, acquire and abort.
+3. Image packet reassembly (packets per frame, pixel format).
+4. Calibration file formats.
+5. The FTDI EEPROM / serial naming used to find the device.
+
+Without a FinnoRay-family sensor none of this can be verified.
+
+**SDK commands (Invoke) → CDetectorE4 FSM events** (E4S FUN_10012a70; events are posted with FUN_10105c40(event, param))
+
+| SDK cmd | Event | Notes |
+|---|---|---|
+| 1 | — | set log level |
+| 2 | 3 | connect |
+| 3 | 7 | disconnect |
+| 6 | 0x14 | set correction option (param, e.g. 0x20000) |
+| 8 | 0x1D | |
+| 0x5A | 0x47 | |
+| 0x3EA | 0x12 | start acquire (only in state 2) |
+| 0x3EC | 0x12 / 0x3F | |
+| 0x3ED | 0x41 | |
+| 0x3EF, 0x3F2 | 0x3F | |
+| 0x7D1, 0x7EE | 9 | read ROM/RAM |
+| 0x7D2 | 0xE | |
+| 0x7D3 | 0xB | |
+| 0x7D4 | 0xC | |
+| 0x7D7 | 0x1E | |
+| 0x7D8 | 0x21 | |
+| 0x7EF | 0xA | write user RAM: used by AcqImageEx after the three SetAttr calls |
+| 0x7F3 | 0x35 | two 0x200-byte buffers |
+| 0x7F4 | 0x36 | |
+| 0xBB9 | 0x15 | |
+| 0xBBA | 0x16 | param 2 |
+| 0xFA8 | 0x16 | param 10 |
+| 0xBBF | 0x17 | |
+| 0xBC9 | 0x20 | |
+| 0xBCA | 0x37 | |
+| 0xBCD | 0x22 | |
+| 0xBDB | 0x43 | |
+
+**Wire command codes (byte 9 of 0xAB55 packets)**, from the RTTI templates `CE4RequestT<N>`, `CE4RequestByteParaT<N>`, `CE4RequestWordParaT<N>`, `CE4Request2ByteParaT<N>` and the inline builders:
+
+- 0x01: reset.
+- 0x03: word parameter.
+- 0x04: connect / handshake, also used to stop sequence acquisition.
+- 0x06: `PrepSingleTime` (prepare single exposure; waits for "expose enable").
+- 0x07, 0x0A, 0x0D, 0x11, 0x65 (2-byte parameter), 0x66, 0x69, 0x6E, 0x6F, 0x72, 0xC0, 0xC1, 0xE5 (byte parameter): not yet identified.
+- 0x74: write DR config (user RAM).
+- 0x75: read DR config.
+- 0x76: write DR config (user ROM).
+- 0x7F: write DR config (factory ROM / special, 0x200-byte block).
+- Other request classes: ReadFileFromFPD, ManageFile, Replenish (resend lost image packets), OrphanImageCheck, RWRtcTime, Read/WriteWifiConfig, ReadWifiStatus, WriteCustomerROM, Read/WriteLicenseData, DownloadFile, EnterUpgrade(Firmware), UpdateFinish.
+
+**Enums** (FpdSys, in declaration order)
+
+- `Enm_TriggerMode`: Outer=0, Inner=1, Soft=2, Prep=3, Service=4, FreeSync=5, **AED_DC=6, AED_AC=7**. This matches NanoPix: INI "DC" → 6, "AC" → 7.
+- `Enm_TriggerThreshold`: 0=5 µGy, 1=20, 2=50, 3=100, 4=150, 5=200, 6=300, 7=500 µGy. NanoPix's threshold formula therefore picks an AED dose threshold from the kV/mA radios.
+- The attributes AcqImageEx writes (0x9CA, 0x9CE, 0xA04) are `Attr_UROM_TriggerMode_W`, `Attr_UROM_SetDelayTime_W` and `Attr_UROM_TriggerThreshold_W`. They are fields of the user-ROM/RAM config block, sent with 0x74 after Invoke(0x7EF).
+- Their byte offsets in that block are **not mapped yet**. The names are built at static-init time; the ID → offset table still has to be found.
+
+**User-RAM config block (payload of command 0x74, exactly 512 bytes)**
+
+- Builder: E4S FUN_100173d0. Header `55 AB 00 00 55 …`, command 0x74, 0x200 parameter bytes = the block. It is sent with a 1000 ms timeout.
+- The block is serialized by FUN_10030a60 (ECX = config struct at CDetectorE4+0x1ABC, EDX = raw block at +0x2350). Multi-byte fields are little-endian.
+- Read back with command 0x75 into the same layout.
+
+| Block offset | Size | Struct offset | Field |
+|---|---|---|---|
+| 0x30 | u16 | +0x9C | **trigger threshold, raw register value** |
+| 0x37 | u16 | +0xB8 | attr 0x9C9 |
+| 0x3A | u8 | +0xC4 | **trigger mode** (Enm_TriggerMode: 6 = AED_DC, 7 = AED_AC) |
+| 0x3B | u8 | +0xC8 | attr 0x9CB |
+| 0x47 | u16 | +0xD4 | **set-delay time** (NanoPix: 1000 for DC, 1500 for AC) |
+| 0x86 | u8 | +0x194 | attr 0x9E0 |
+| 0x9A | — | +0x1F4 | attr 0x9F7 |
+
+Other block offsets written by the serializer (meaning unknown):
+
+- IP addresses: 0x01–0x05 and 0x06–0x09, `%d.%d.%d.%d`.
+- Date/time strings: 0x11–0x14, 0x15–0x18, 0x19–0x1C.
+- MAC addresses: 0x62–0x67 and 0x6E–0x73, `%02X…`.
+- u16 at 0x24 and 0x26, 0x35, 0x43–0x4D, 0x51, 0x5D, 0x87, 0x89, 0x8C.
+- Tables at 0x1B0–0x1BF (bytes) and 0x1C0–0x1FF (u16 × 32).
+
+**Threshold register values** (std::maps at 0x103A66AC (AED_DC) and 0x103A66B4 (other modes); both are filled with the same pairs)
+
+- Level → raw: 1 → 8000, 2 → 5472, 3 → 2315, 4 → 1547, 5 → 1000, 6 → 778, 7 → 500, 8 → 300.
+- When reading the block back, FUN_10019070 maps raw → level.
+- The level is most likely `Enm_TriggerThreshold + 1`, i.e. 5 µGy → 8000 … 500 µGy → 300. **Unverified:** the direction (whether a higher raw value means more or less sensitive) needs a real sensor.
+
+So NanoPix's DC default (kV radio ≥ 2, mA radio 4 → threshold 6 = 300 µGy) would write raw 500 at block offset 0x30, trigger mode 6 at 0x3A and delay 1000 at 0x47. The safe way to change it is read-modify-write: 0x75 to read the block, patch the three fields, then 0x74 to write it back.
+
+**src/finnoray.rs** (first Rust code for this family, no dependencies)
+
+What it contains:
+- Packet kinds (0xAB55/66/67/EE/11/22/23).
+- `command()`: builds the packet: header, BE length, sequence, code, params, checksum, 0xAA.
+- `Sequence`: the packet counter (wraps to 2).
+- `acknowledged()`: reads the ACK echo (unverified on hardware).
+- `TriggerMode`, `THRESHOLD_UGY`, `THRESHOLD_RAW`.
+- `Aed::from_preferences(dc, kv_index, ma_index)`: NanoPix's formula.
+- `ConfigBlock`: 512 bytes; `apply()` patches only 0x30, 0x3A and 0x47; `write_ram()` builds the 0x74 packet.
+
+Status:
+- Compiles cleanly (`rustc --test -D warnings`).
+- The unit tests have not run: Windows App Control on this PC blocks freshly built executables and proc-macro DLLs. The same block now also stops the full cargo build (bytemuck_derive).
+
+Not done yet: the FTDI transport, image reassembly (0xAB66) and wiring into the Acquisition screen.

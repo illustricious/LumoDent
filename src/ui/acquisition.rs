@@ -66,6 +66,9 @@ pub struct Capture {
     pub devices: Vec<Found>,
     pub searched: bool,
     last_search: Option<std::time::Instant>,
+    /// A search running on a worker thread: enumerating USB devices through
+    /// SetupAPI can take tens of milliseconds, too long for the UI thread.
+    pending: Option<Receiver<Vec<Found>>>,
     pub details: Option<Details>,
     rx: Option<Receiver<Event>>,
     stop: Option<Arc<AtomicBool>>,
@@ -81,10 +84,13 @@ impl Capture {
         self.rx.is_some()
     }
 
-    /// Looks for sensors bound to the NanoPix driver.
-    pub fn search(&mut self) {
-        self.devices = sensor_usb::find_sensors();
-        self.searched = true;
+    /// Starts looking for sensors bound to the NanoPix driver, off the UI thread.
+    fn search(&mut self) {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(sensor_usb::find_sensors());
+        });
+        self.pending = Some(rx);
         self.last_search = Some(std::time::Instant::now());
     }
 
@@ -94,11 +100,21 @@ impl Capture {
         if self.running() {
             return;
         }
-        if self.last_search.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
-            self.search();
-            if let Some(found) = self.devices.first().cloned() {
-                self.start(Source::Usb(found));
+        if let Some(rx) = &self.pending {
+            match rx.try_recv() {
+                Ok(devices) => {
+                    self.pending = None;
+                    self.devices = devices;
+                    self.searched = true;
+                    if let Some(found) = self.devices.first().cloned() {
+                        self.start(Source::Usb(found));
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(_) => self.pending = None,
             }
+        } else if self.last_search.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+            self.search();
         }
     }
 
@@ -327,13 +343,16 @@ impl App {
             return;
         }
         self.capture.auto_connect();
+        // Wake twice a second so the background search result and the next
+        // search happen without mouse movement (this screen only).
+        ui.ctx().request_repaint_after(Duration::from_millis(500));
         if self.capture.running() {
             ui.label(egui::RichText::new(&self.capture.status).size(18.0));
             return;
         }
         if self.capture.devices.is_empty() {
             ui.label(egui::RichText::new(t("Sensor not connected")).size(18.0).color(theme::muted()));
-            ui.label(t("Searching for a NanoPix-E sensor through its driver (USB 04B4:0042-0046). It connects by itself once plugged in."));
+            ui.label(t("Searching for a sensor. It connects by itself once plugged in."));
         }
         let mut start = None;
         ui.add_space(8.0);
