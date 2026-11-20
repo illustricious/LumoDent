@@ -1,14 +1,14 @@
 //! Acquisition screen: the patient, the X-ray generator settings the
 //! reference shows beside the capture area (DC/AC, kV, mA), and the sensor.
-//! A sensor is either a real NanoPix-E found through its driver (src/cyusb.rs)
+//! A sensor is either a real NanoPix-E found on the USB bus (src/usb)
 //! or the built-in simulator (src/simulator.rs); both run the same sensor_io
 //! protocol on a worker thread that waits for X-rays and reads the frame.
 
 use super::{section, t, theme, App};
 use eframe::egui::{self, vec2, Ui};
-use lumodent::cyusb::{self, Found};
+use lumodent::usb::{self as sensor_usb, Found};
 use lumodent::settings::{KV, MA_AC, MA_DC};
-use lumodent::usb_sensor::{self, Sensor, Transport, PRODUCT_IDS, VENDOR_ID};
+use lumodent::usb_sensor::{self, Sensor, Transport};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
@@ -77,7 +77,7 @@ impl Capture {
 
     /// Looks for sensors bound to the NanoPix driver.
     pub fn search(&mut self) {
-        self.devices = cyusb::find().into_iter().filter(|d| d.vendor == VENDOR_ID && PRODUCT_IDS.contains(&d.product)).collect();
+        self.devices = sensor_usb::find_sensors();
         self.searched = true;
         self.last_search = Some(std::time::Instant::now());
     }
@@ -106,7 +106,7 @@ impl Capture {
                 self.exposure = Some(exposure);
                 Ok(Box::new(sim))
             }
-            Source::Usb(found) => cyusb::CyDevice::open(&found.path).map(|d| Box::new(d) as Box<dyn Transport + Send>),
+            Source::Usb(found) => sensor_usb::open(found),
         };
         let transport = match transport {
             Ok(t) => t,

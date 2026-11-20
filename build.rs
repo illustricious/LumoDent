@@ -103,8 +103,18 @@ fn main() {
         return;
     }
     let obj = out.join("lumodent-res.o");
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let triple = match arch.as_str() {
+        "aarch64" => "aarch64-w64-mingw32",
+        "x86" => "i686-w64-mingw32",
+        _ => "x86_64-w64-mingw32",
+    };
     for tool in ["llvm-windres", "windres", "x86_64-w64-mingw32-windres"] {
-        let ok = Command::new(tool).arg(&rc).arg("-O").arg("coff").arg("-o").arg(&obj).status().map(|s| s.success()).unwrap_or(false);
+        let mut cmd = Command::new(tool);
+        if tool == "llvm-windres" {
+            cmd.arg(format!("--target={triple}"));
+        }
+        let ok = cmd.arg(&rc).arg("-O").arg("coff").arg("-o").arg(&obj).status().map(|s| s.success()).unwrap_or(false);
         if ok {
             println!("cargo:rustc-link-arg-bins={}", obj.display());
             return;

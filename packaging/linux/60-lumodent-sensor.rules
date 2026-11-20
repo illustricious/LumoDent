@@ -1,0 +1,3 @@
+# NanoPix intraoral sensors (Cypress FX2, VID 04b4, PID 0042-0046): let
+# LumoDent open them without root.
+SUBSYSTEM=="usb", ATTR{idVendor}=="04b4", ATTR{idProduct}=="004[2-6]", MODE="0666", TAG+="uaccess"

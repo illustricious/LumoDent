@@ -20,6 +20,7 @@ pub mod settings;
 pub mod simulator;
 pub mod sha256;
 pub mod studies;
+pub mod usb;
 pub mod usb_sensor;
 pub mod users;
 pub mod workspace;

@@ -10,6 +10,9 @@
 //! +0x22) followed by the data, sent with IOCTL 0x220020 for endpoint 0 and
 //! 0x220024 for the bulk endpoint.
 
+pub use crate::usb::Found;
+#[cfg(windows)]
+use crate::usb::bulk_in_endpoint;
 use crate::usb_sensor::Transport;
 
 pub const IOCTL_EP0: u32 = 0x0022_0020;
@@ -48,29 +51,6 @@ pub fn bulk_request(endpoint: u8, len: usize) -> Vec<u8> {
 pub fn reply_data(b: &[u8]) -> Vec<u8> {
     let len = b.get(0x22..0x26).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]) as usize).unwrap_or(0);
     b.get(HEADER..HEADER + len.min(b.len().saturating_sub(HEADER))).unwrap_or(&[]).to_vec()
-}
-
-/// The first bulk IN endpoint of a configuration descriptor.
-pub fn bulk_in_endpoint(config: &[u8]) -> Option<u8> {
-    let mut i = 0;
-    while i + 1 < config.len() {
-        let (len, kind) = (config[i] as usize, config[i + 1]);
-        if len < 2 {
-            return None;
-        }
-        if kind == 5 && i + 3 < config.len() && config[i + 2] & 0x80 != 0 && config[i + 3] & 3 == 2 {
-            return Some(config[i + 2]);
-        }
-        i += len;
-    }
-    None
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Found {
-    pub path: String,
-    pub vendor: u16,
-    pub product: u16,
 }
 
 #[cfg(windows)]
@@ -302,16 +282,5 @@ mod tests {
         done[0x26] = 0xAA;
         done[0x22..0x26].copy_from_slice(&2u32.to_le_bytes());
         assert_eq!(reply_data(&done), vec![0xAA, 0]);
-    }
-
-    #[test]
-    fn finds_the_bulk_in_endpoint() {
-        // config(9) + interface(9) + EP 0x02 bulk OUT + EP 0x86 bulk IN
-        let mut c = vec![9, 2, 32, 0, 1, 1, 0, 0x80, 50];
-        c.extend([9, 4, 0, 0, 2, 0xff, 0, 0, 0]);
-        c.extend([7, 5, 0x02, 2, 0, 2, 0]);
-        c.extend([7, 5, 0x86, 2, 0, 2, 0]);
-        assert_eq!(bulk_in_endpoint(&c), Some(0x86));
-        assert_eq!(bulk_in_endpoint(&c[..25]), None);
     }
 }

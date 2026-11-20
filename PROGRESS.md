@@ -301,3 +301,13 @@ for an unprogrammed FX2 (`usb_sensor.rs`).
 - Gender is a Male/Female choice, as in the reference.
 - New tooth mark (`src/logo.rs`) for the window, in-app logo, Linux SVG and the
   .exe file icon (build.rs writes a .ico and links it with llvm-windres).
+
+## Sensor USB on other systems
+
+`src/usb/` picks the USB path per system; the sensor protocol stays shared:
+Windows uses the installed NanoPix driver (src/cyusb.rs); Linux/Android use
+usbfs ioctls with no driver (udev rule in packaging/linux/60-lumodent-sensor.rules);
+FreeBSD uses the base system's libusb; macOS uses IOKit's USB user client
+through its plug-in interfaces. All five targets (Windows x64/ARM64, Linux
+x64/ARM64, macOS ARM64/x64, FreeBSD x64) compile; only Windows has been built
+into a runnable binary here, and none of the USB paths has met a sensor yet.
