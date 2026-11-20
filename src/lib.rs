@@ -16,5 +16,6 @@ pub mod sensor;
 pub mod settings;
 pub mod sha256;
 pub mod studies;
+pub mod usb_sensor;
 pub mod users;
 pub mod workspace;

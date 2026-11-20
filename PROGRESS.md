@@ -258,3 +258,15 @@ Fitur yang tadinya hanya tersimpan di Pengaturan sekarang dipakai:
 - **Layar Akuisisi**: panel generator DC/AC, kV dan mA seperti NanoPix, langsung tersimpan ke Pengaturan. Pengambilan gambar tetap menunggu driver sensor.
 
 Anotasi (bentuk, memo dan penggaris, tanpa grid dan lensa) ikut tercetak saat Kirim ke Laporan, Ekspor Gambar dan Ekspor DICOM: `src/ui/burn.rs` membangun shape egui yang sama dengan di layar, egui men-tessellate-nya (teks memakai atlas font yang sama), lalu segitiganya diisi ke piksel gambar. Ukurannya mengikuti zoom saat itu (tidak pernah lebih tipis dari tampilan 100%), jadi hasil cetak terlihat seperti di layar. DICOM berwarna karena anotasi disimpan sebagai Secondary Capture.
+
+## NanoPix-E sensor protocol (sensor_io.dll)
+
+`src/usb_sensor.rs` ports the HDR_MultiDevice protocol: Cypress FX vendor
+control requests (0xB1 device info, 0xB5 dark lines, 0xB6 frame, 0xB7 reset,
+0xB9 generation, 0xC4 firmware, 0xC7 bit depth, 0xD4 HDR mode, ...) and bulk
+frame reads. Covered: open sequence, dark baseline, X-ray trigger
+(baseline + threshold), frame decoding for both line formats (older: +0x2E
+offset, high-byte bias 8; newer: 0xAA sync, inverted 7+7-bit pixels, HDR and
+12/14/16-bit variants, binning, corner chamfers), integration time, binning,
+HDR value. Tested against a fake USB transport only. Not done: a WinUSB
+transport for the real device and the device's VID/PID (in the driver .inf).
