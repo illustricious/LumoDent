@@ -17,6 +17,9 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
     if crate::dicom::is_dicom(data) {
         return crate::dicom::parse(data).map(|d| d.image);
     }
+    if crate::iosm::is_iosm(data) {
+        return crate::iosm::decode(data);
+    }
     if data.starts_with(b"BM") {
         return decode_bmp(data);
     }

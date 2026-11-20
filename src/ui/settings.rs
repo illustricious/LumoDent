@@ -4,6 +4,7 @@
 use super::{i18n, t, App};
 use eframe::egui::{self, vec2, Color32, Id, Layout, Ui};
 use lumodent::reports::Clinic;
+use lumodent::workspace::Workspace;
 use lumodent::settings::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,9 @@ pub struct Dialog {
     clinic: Clinic,
     indonesian: bool,
     light: bool,
+    /// The NanoPix data folder in use, and whether "Choose…" was pressed.
+    nanopix: Option<std::path::PathBuf>,
+    pick_nanopix: bool,
 }
 
 /// Where a row leaves its caption's id for the widgets in it.
@@ -106,6 +110,17 @@ fn stroke(ui: &mut Ui, id: &str, label: &str, s: &mut Stroke) {
 
 impl Dialog {
     fn general(&mut self, ui: &mut Ui) {
+        section(ui, t("NanoPix Data"), "set-nanopix", |ui| {
+            row(ui, t("NanoPix Data Folder"), |ui| {
+                ui.horizontal(|ui| {
+                    let shown = self.nanopix.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| t("Not used").to_string());
+                    ui.label(shown);
+                    if ui.button(t("Choose Folder...")).clicked() {
+                        self.pick_nanopix = true;
+                    }
+                });
+            });
+        });
         section(ui, t("Language"), "set-lang", |ui| {
             row(ui, t("Language"), |ui| {
                 ui.horizontal(|ui| {
@@ -263,6 +278,8 @@ impl App {
             clinic: self.report.clinic.clone(),
             indonesian: i18n::is_indonesian(),
             light: super::theme::is_light(),
+            nanopix: self.ws.legacy.clone(),
+            pick_nanopix: false,
         });
     }
 
@@ -310,6 +327,22 @@ impl App {
             .inner
         });
         let (ok, cancel) = modal.inner;
+        if let Some(d) = self.settings_dialog.as_mut().filter(|d| d.pick_nanopix) {
+            d.pick_nanopix = false;
+            if let Some(folder) = (self.hooks.pick_folder)() {
+                match Workspace::use_nanopix_folder(self.ws.data.clone(), &folder) {
+                    Ok(ws) => {
+                        self.ws = ws;
+                        if let Some(d) = self.settings_dialog.as_mut() {
+                            d.nanopix = self.ws.legacy.clone();
+                        }
+                        let r = self.refresh_patients();
+                        self.check(r);
+                    }
+                    Err(e) => self.notice = Some(e),
+                }
+            }
+        }
         if ok {
             let dialog = self.settings_dialog.take().unwrap();
             if dialog.indonesian != i18n::is_indonesian() {

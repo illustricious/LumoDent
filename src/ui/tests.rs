@@ -39,6 +39,7 @@ fn start(tag: &str) -> (Harness<'static, App>, Env) {
     let (pick, save, opened) = (env.pick.clone(), env.save.clone(), env.opened.clone());
     let hooks = Hooks {
         pick_image: Box::new(move || pick.borrow().clone()),
+        pick_folder: Box::new(|| None),
         save_file: Box::new(move |_, _| save.borrow().clone()),
         open_file: Box::new(move |path| {
             opened.borrow_mut().push(path.to_path_buf());

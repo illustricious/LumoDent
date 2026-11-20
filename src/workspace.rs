@@ -10,7 +10,7 @@ use crate::users::UserStore;
 use std::path::{Path, PathBuf};
 
 pub const ALL_DATES: (&str, &str) = ("", "9999-12-31 23:59:59");
-pub const IMPORT_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "dcm"];
+pub const IMPORT_EXTENSIONS: [&str; 6] = ["jpg", "jpeg", "png", "bmp", "dcm", "iosm"];
 
 pub struct Workspace {
     pub store: PatientStore,
@@ -64,6 +64,16 @@ impl Workspace {
         Ok(Self { store, users, data, legacy: Some(install.data.clone()) })
     }
 
+    /// Switches to a NanoPix data folder chosen by hand and remembers it in
+    /// `nanopix-data.txt`, which the next start reads before NanoPix's INI.
+    pub fn use_nanopix_folder(data: PathBuf, folder: &Path) -> Result<Self, String> {
+        let install = crate::nanopix::Install::from_folder(folder)
+            .ok_or_else(|| format!("{} has no NanoPix database (database\\NanoPix.db3).", folder.display()))?;
+        let ws = Self::open_nanopix(data, &install)?;
+        std::fs::write(ws.data.join("nanopix-data.txt"), folder.to_string_lossy().as_bytes()).map_err(io)?;
+        Ok(ws)
+    }
+
     /// Where a study's file is: LumoDent's image folder, a path stored as
     /// is, or (for NanoPix data) the first file of that name found in the
     /// NanoPix data folder, preferring one under a folder named after the patient.
@@ -77,7 +87,18 @@ impl Workspace {
             return stored;
         }
         if let Some(root) = &self.legacy {
-            let name = std::path::Path::new(&study.image_name).file_name().map(|n| n.to_os_string());
+            // NanoPix stores "<data>/<patient id>/<image name>.<type>", the
+            // name without its extension and the type (e.g. IOSM) apart.
+            let file = if study.image_type.is_empty() || std::path::Path::new(&study.image_name).extension().is_some() {
+                study.image_name.clone()
+            } else {
+                format!("{}.{}", study.image_name, study.image_type.to_ascii_lowercase())
+            };
+            let direct = root.join(folder_name(&study.patient_id)).join(&file);
+            if direct.is_file() {
+                return direct;
+            }
+            let name = std::path::Path::new(&file).file_name().map(|n| n.to_os_string());
             if let Some(name) = name {
                 let mut found = Vec::new();
                 find_files(root, &name, 5, &mut found);
@@ -134,7 +155,7 @@ impl Workspace {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .filter(|e| IMPORT_EXTENSIONS.contains(&e.as_str()))
-            .ok_or("Only .jpg, .jpeg, .png, .bmp and .dcm images can be imported.")?;
+            .ok_or("Only .jpg, .jpeg, .png, .bmp, .dcm and .iosm images can be imported.")?;
         let bytes = std::fs::read(source).map_err(io)?;
         decode(&bytes)?;
         let tags = crate::dicom::is_dicom(&bytes).then(|| crate::dicom::parse(&bytes).map(|d| d.tags)).transpose()?.unwrap_or_default();

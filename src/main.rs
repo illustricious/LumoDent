@@ -45,6 +45,11 @@ fn data_dir() -> Result<PathBuf, String> {
 /// keeps using it.
 fn open_workspace(data: PathBuf) -> Result<Workspace, String> {
     let marker = data.join("nanopix-data.txt");
+    // A folder chosen in Settings (or found before) wins over the INI.
+    let remembered = std::fs::read_to_string(&marker).ok().map(|s| PathBuf::from(s.trim()));
+    if let Some(install) = remembered.as_deref().and_then(lumodent::nanopix::Install::from_folder) {
+        return Workspace::open_nanopix(data, &install);
+    }
     let own_db = data.join("patients.sqlite3").exists() && !marker.exists();
     let install = (std::env::var_os("LUMODENT_DATA").is_none() && !own_db)
         .then(lumodent::nanopix::ini_path)

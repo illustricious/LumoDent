@@ -52,6 +52,7 @@ pub struct Confirm {
 /// Operating-system services, replaceable in tests.
 pub struct Hooks {
     pub pick_image: Box<dyn FnMut() -> Option<PathBuf>>,
+    pub pick_folder: Box<dyn FnMut() -> Option<PathBuf>>,
     /// Asks where to save a file: suggested name and extension ("pdf", "png").
     pub save_file: Box<dyn FnMut(&str, &str) -> Option<PathBuf>>,
     pub open_file: Box<dyn FnMut(&Path) -> Result<(), String>>,
@@ -63,9 +64,10 @@ impl Hooks {
             pick_image: Box::new(|| {
                 rfd::FileDialog::new()
                     .set_title(t("Import Image"))
-                    .add_filter(t("Image Files (.jpg .jpeg .png .bmp .dcm)"), &lumodent::workspace::IMPORT_EXTENSIONS)
+                    .add_filter(t("Image Files (.jpg .jpeg .png .bmp .dcm .iosm)"), &lumodent::workspace::IMPORT_EXTENSIONS)
                     .pick_file()
             }),
+            pick_folder: Box::new(|| rfd::FileDialog::new().set_title(t("NanoPix Data Folder")).pick_folder()),
             save_file: Box::new(|name, ext| {
                 rfd::FileDialog::new()
                     .set_title(t("Save As"))

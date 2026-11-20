@@ -57,6 +57,10 @@ pub fn t(en: &'static str) -> &'static str {
         // Settings dialog
         "Settings…" => "Pengaturan…",
         "Settings" => "Pengaturan",
+        "NanoPix Data" => "Data NanoPix",
+        "NanoPix Data Folder" => "Folder Data NanoPix",
+        "Not used" => "Tidak dipakai",
+        "Choose Folder..." => "Pilih Folder...",
         "General" => "Umum",
         "User Style" => "Gaya Tampilan",
         "Icon Size" => "Ukuran Ikon",
@@ -119,7 +123,7 @@ pub fn t(en: &'static str) -> &'static str {
         "Print Report…" => "Cetak Laporan…",
         "Intraoral X-ray workstation" => "Workstation rontgen intraoral",
         "Save As" => "Simpan Sebagai",
-        "Image Files (.jpg .jpeg .png .bmp .dcm)" => "Berkas Gambar (.jpg .jpeg .png .bmp .dcm)",
+        "Image Files (.jpg .jpeg .png .bmp .dcm .iosm)" => "Berkas Gambar (.jpg .jpeg .png .bmp .dcm .iosm)",
         // Navigation
         "Patient" => "Pasien",
         "Acquisition" => "Akuisisi",

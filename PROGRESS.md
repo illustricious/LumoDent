@@ -311,3 +311,10 @@ FreeBSD uses the base system's libusb; macOS uses IOKit's USB user client
 through its plug-in interfaces. All five targets (Windows x64/ARM64, Linux
 x64/ARM64, macOS ARM64/x64, FreeBSD x64) compile; only Windows has been built
 into a runnable binary here, and none of the USB paths has met a sensor yet.
+
+## 0.7.1 — NanoPix .iosm images and model names
+
+- `.iosm` (NanoPix's image format) is read: a zstd frame (own decoder, src/zstd.rs, RFC 8878 without dictionaries) around a 0x94-byte header (height f32 @0x2C, width f32 @0x30, byte length u32 @0x94), the processed 16-bit image, the raw frame and DICOM strings (src/iosm.rs). `.iosm` can also be imported.
+- NanoPix studies store `image_name` without extension and `image_type` "IOSM"; files are `<data>\<patient id>\<name>.iosm`.
+- Settings → General → "NanoPix Data Folder": choose a NanoPix data folder by hand (e.g. copied from another PC, or when the INI points to a missing drive). Remembered in `nanopix-data.txt`, read before the INI on start.
+- Sensor names: NanoPix-E by product 0x44; NanoPix 1 / 1.5 / 2 by reported frame size (nearest model).

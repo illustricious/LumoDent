@@ -55,6 +55,15 @@ pub struct Install {
 }
 
 impl Install {
+    /// A data folder chosen by hand (e.g. copied from another PC): it must
+    /// hold database/NanoPix.db3. NanoPix's INI, when present, still supplies
+    /// the preferences.
+    pub fn from_folder(dir: &Path) -> Option<Self> {
+        let ini = ini_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Ini::parse(&t)).unwrap_or_else(|| Ini::parse(""));
+        let install = Install { data: dir.to_path_buf(), ini };
+        install.main_db().is_file().then_some(install)
+    }
+
     pub fn main_db(&self) -> PathBuf {
         self.data.join("database").join("NanoPix.db3")
     }

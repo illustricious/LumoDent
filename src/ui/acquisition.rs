@@ -32,12 +32,18 @@ pub struct Details {
     pub hdr_mode: u8,
 }
 
-/// The family name for a sensor_io product code (the driver binds 0x42-0x46;
-/// NanoPix-E reports 0x44).
-pub fn model_name(product: u16, simulated: bool) -> String {
-    let base = match product {
-        0x44 => "NanoPix-E".to_string(),
-        p => format!("NanoPix (0x{p:02X})"),
+/// The model: NanoPix-E by its product ID (0x44), the others (NanoPix 1, 1.5,
+/// 2) by the frame size the sensor reports, like JudgeSensorSize; a size a few
+/// border rows off still matches the nearest model.
+pub fn model_name(product: u16, width: usize, height: usize, simulated: bool) -> String {
+    let gap = |m: &lumodent::sensor::SensorModel| {
+        (m.width.abs_diff(width) + m.height.abs_diff(height)).min(m.width.abs_diff(height) + m.height.abs_diff(width))
+    };
+    let by_size = lumodent::sensor::MODELS.iter().min_by_key(|m| gap(m)).filter(|m| gap(m) < 200);
+    let base = match (product, by_size) {
+        (0x44, _) => "NanoPix-E".to_string(),
+        (_, Some(m)) => m.name.to_string(),
+        (p, None) => format!("NanoPix (0x{p:02X})"),
     };
     if simulated { format!("{base} ({})", t("Simulator")) } else { base }
 }
@@ -129,7 +135,7 @@ impl Capture {
             sensor.set_threshold(THRESHOLD);
             let (w, h) = (sensor.info.width as usize, sensor.info.height as usize);
             let _ = tx.send(Event::Connected(Details {
-                model: model_name(sensor.info.product, usb.is_none()),
+                model: model_name(sensor.info.product, sensor.info.width as usize, sensor.info.height as usize, usb.is_none()),
                 serial: sensor.info.serial.clone(),
                 firmware: sensor.firmware.clone(),
                 usb,
