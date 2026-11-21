@@ -8,6 +8,7 @@ pub mod cyusb;
 pub mod dates;
 pub mod dicom;
 pub mod finnoray;
+pub mod ftdi;
 pub mod hdr;
 pub mod image;
 pub mod iosm;

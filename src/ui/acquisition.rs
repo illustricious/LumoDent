@@ -59,6 +59,42 @@ pub enum Event {
 pub enum Source {
     Simulator,
     Usb(Found),
+    /// NanoPix 1 / 1.5 / 2 behind an FTDI USB FIFO (src/ftdi.rs, src/finnoray.rs).
+    Ftdi(lumodent::ftdi::Device),
+}
+
+/// Runs a NanoPix 1 / 1.5 / 2 session and turns its reports into events.
+fn ftdi_worker(port: lumodent::ftdi::Port, device: lumodent::ftdi::Device, aed: lumodent::finnoray::Aed, flag: Arc<AtomicBool>, tx: std::sync::mpsc::Sender<Event>) {
+    use lumodent::finnoray::Report;
+    let stop = || flag.load(Ordering::SeqCst);
+    let serial = device.serial.clone();
+    let mut report = |r: Report| {
+        let e = match r {
+            Report::Connected => Event::Connected(Details {
+                model: if device.description.is_empty() { "NanoPix".into() } else { device.description.clone() },
+                serial: serial.clone(),
+                firmware: [String::new(), String::new()],
+                usb: Some((device.vendor, device.product)),
+                width: 0,
+                height: 0,
+                bits: 16,
+                generation: 0,
+                hdr_mode: 0,
+            }),
+            Report::Configured(None) => Event::Status("Sensor settings could not be read; using the sensor's own."),
+            Report::Configured(Some(_)) | Report::Ready => Event::Status("Ready for exposure"),
+            Report::Reading => Event::Status("Reading image..."),
+            Report::Frame { width, height, pixels } => Event::Frame {
+                raw: pixels.iter().flat_map(|p| p.to_be_bytes()).collect(),
+                width,
+                height,
+                serial: serial.clone(),
+            },
+            Report::Failed(e) => Event::Failed(e),
+        };
+        let _ = tx.send(e);
+    };
+    lumodent::finnoray::run(port, aed, &stop, &mut report);
 }
 
 #[derive(Default)]
@@ -68,7 +104,13 @@ pub struct Capture {
     last_search: Option<std::time::Instant>,
     /// A search running on a worker thread: enumerating USB devices through
     /// SetupAPI can take tens of milliseconds, too long for the UI thread.
-    pending: Option<Receiver<Vec<Found>>>,
+    pending: Option<Receiver<(Vec<Found>, Vec<lumodent::ftdi::Device>)>>,
+    pub ftdi: Vec<lumodent::ftdi::Device>,
+    /// The AED settings sent to a NanoPix 1 / 1.5 / 2 when it connects.
+    pub aed: Option<lumodent::finnoray::Aed>,
+    /// Whether the running session is an FTDI sensor (it is reconnected
+    /// when the generator settings change, to send them).
+    pub ftdi_session: bool,
     pub details: Option<Details>,
     rx: Option<Receiver<Event>>,
     stop: Option<Arc<AtomicBool>>,
@@ -88,7 +130,7 @@ impl Capture {
     fn search(&mut self) {
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let _ = tx.send(sensor_usb::find_sensors());
+            let _ = tx.send((sensor_usb::find_sensors(), lumodent::ftdi::list()));
         });
         self.pending = Some(rx);
         self.last_search = Some(std::time::Instant::now());
@@ -102,12 +144,15 @@ impl Capture {
         }
         if let Some(rx) = &self.pending {
             match rx.try_recv() {
-                Ok(devices) => {
+                Ok((devices, ftdi)) => {
                     self.pending = None;
                     self.devices = devices;
+                    self.ftdi = ftdi;
                     self.searched = true;
                     if let Some(found) = self.devices.first().cloned() {
                         self.start(Source::Usb(found));
+                    } else if let Some(d) = self.ftdi.first().cloned() {
+                        self.start(Source::Ftdi(d));
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -122,7 +167,25 @@ impl Capture {
         self.disconnect();
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
+        if let Source::Ftdi(device) = &source {
+            let port = match lumodent::ftdi::Port::open(&device.serial) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.status = e;
+                    return;
+                }
+            };
+            self.status = t("Connecting...").into();
+            let aed = self.aed.unwrap_or_else(|| lumodent::finnoray::Aed::from_preferences(true, 0, 0));
+            let (device, flag) = (device.clone(), stop.clone());
+            std::thread::spawn(move || ftdi_worker(port, device, aed, flag, tx));
+            self.rx = Some(rx);
+            self.stop = Some(stop);
+            self.ftdi_session = true;
+            return;
+        }
         let transport: Result<Box<dyn Transport + Send>, String> = match &source {
+            Source::Ftdi(_) => unreachable!(),
             Source::Simulator => {
                 let (sim, exposure) = lumodent::simulator::Simulator::new();
                 self.exposure = Some(exposure);
@@ -139,7 +202,7 @@ impl Capture {
         };
         self.status = t("Connecting...").into();
         let usb = match &source {
-            Source::Simulator => None,
+            Source::Simulator | Source::Ftdi(_) => None,
             Source::Usb(f) => Some((f.vendor, f.product)),
         };
         let flag = stop.clone();
@@ -188,6 +251,7 @@ impl Capture {
             stop.store(true, Ordering::SeqCst);
         }
         self.rx = None;
+        self.ftdi_session = false;
         self.exposure = None;
         self.connected = None;
         self.details = None;
@@ -276,9 +340,17 @@ impl App {
                         if self.settings.generator_ac { "AC" } else { "DC" }
                     ))
                     .strong());
+                    let aed = lumodent::finnoray::Aed::from_preferences(!self.settings.generator_ac, self.settings.kv as u8, self.settings.ma as u8);
+                    ui.label(egui::RichText::new(format!("{}: {} µGy", t("Exposure trigger"), aed.dose_ugy())).color(theme::muted()));
+                    self.capture.aed = Some(aed);
                     if changed {
                         let saved = self.settings.save(&self.ws.data.join("settings.txt"));
                         self.check(saved);
+                        // A NanoPix 1 / 1.5 / 2 gets the new AED settings on
+                        // its next connect, which follows on its own.
+                        if self.capture.ftdi_session {
+                            self.capture.disconnect();
+                        }
                     }
                 });
             });

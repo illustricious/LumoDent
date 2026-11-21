@@ -488,4 +488,24 @@ Status:
 - Compiles cleanly (`rustc --test -D warnings`).
 - The unit tests have not run: Windows App Control on this PC blocks freshly built executables and proc-macro DLLs. The same block now also stops the full cargo build (bytemuck_derive).
 
-Not done yet: the FTDI transport, image reassembly (0xAB66) and wiring into the Acquisition screen.
+**0.7.4: transport, image assembly, Acquisition screen** (all unverified on hardware)
+
+- `src/ftdi.rs`:
+  - Loads the FTDI driver's `ftd2xx.dll` from System32 at run time, the same library ConnUSBfifo links. LumoDent does not ship it; it comes with the FTDI driver.
+  - Lists VID 0403 devices that no other program has open, and opens them by serial number.
+  - Draining works like ConnUSBfifo FUN_10004730: FT_GetQueueStatus, then FT_Read of at most 64 KiB.
+  - Other platforms: no FTDI devices are listed yet.
+- 0xAB66 (E4S FUN_1003d7a0): u16 packet number at byte 4, data length at byte 10, data at 0x10. Packet n goes to frame byte n × 1000, and the frame is complete when packet (count − 1) arrives.
+  - LumoDent has no expected packet count yet, so it treats the frame as done after 300 ms of silence once the byte count equals a known model size (16-bit LE pixels) and no packet number is missing.
+- `finnoray::Framer`: cuts the FIFO stream by packet headers and resyncs on the magic.
+  - 0xAB55 / 0xAB67 length = BE u16 at byte 5 + 9.
+  - 0xAB66 length = 0x10 + data length.
+  - It is a guess that 0xAB67 shares the 0xAB55 header.
+- `finnoray::Session` / `run`: CONNECT, then READ_CONFIG → patch AED → WRITE_RAM, then repeated PREPARE_SINGLE.
+  - If no config block comes back, nothing is written, so unknown fields are never zeroed.
+  - The 0x75 reply is assumed to carry the block at byte 10.
+- Acquisition screen:
+  - The background search also lists FTDI devices and connects to the first one.
+  - The AED from the DC/AC, kV and mA radios is sent on connect, and shown as "Exposure trigger: N µGy".
+  - Changing a radio reconnects the session so the new values are sent.
+- Open questions for a real sensor: whether a FIFO bit mode is needed (FT_SetBitMode), the 0xAB67 layout, whether an expected packet count is sent, the pixel orientation, threshold direction, calibration (gain/defect files) and Replenish for lost packets.

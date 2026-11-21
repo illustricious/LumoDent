@@ -234,6 +234,330 @@ impl std::fmt::Debug for ConfigBlock {
     }
 }
 
+// ---- receiving ------------------------------------------------------------
+
+/// Bytes of image data each 0xAB66 packet's slot covers: packet n lands at
+/// byte n * 1000 of the frame (E4S FUN_1003d7a0).
+pub const IMAGE_SLOT: usize = 1000;
+/// Header bytes before an 0xAB66 packet's data.
+pub const IMAGE_HEADER: usize = 0x10;
+
+fn is_magic(b: &[u8]) -> bool {
+    b.len() >= 2 && kind(b).is_some()
+}
+
+/// Splits the FTDI byte stream into packets. The FIFO has no framing of
+/// its own, so packets are cut by their headers:
+/// - 0xAB55 / 0xAB67: big-endian length at bytes 5-6, total = length + 9.
+/// - 0xAB66: header 0x10 bytes, data length u16 LE at byte 10.
+/// - anything else: up to the next magic.
+///
+/// Bytes that do not start a packet are skipped (resync), so a trailer this
+/// reading does not know about costs nothing.
+#[derive(Default)]
+pub struct Framer {
+    pub buf: Vec<u8>,
+}
+
+impl Framer {
+    pub fn next(&mut self) -> Option<Vec<u8>> {
+        loop {
+            let skip = (0..self.buf.len().saturating_sub(1)).find(|&i| is_magic(&self.buf[i..])).unwrap_or(self.buf.len().saturating_sub(1));
+            self.buf.drain(..skip);
+            let b = &self.buf;
+            let k = kind(b)?;
+            let total = match k {
+                Kind::Command | Kind::Data => (u16::from_be_bytes([*b.get(5)?, *b.get(6)?]) as usize) + 9,
+                Kind::Image => IMAGE_HEADER + u16::from_le_bytes([*b.get(10)?, *b.get(11)?]) as usize,
+                _ => match (2..b.len().saturating_sub(1)).find(|&i| is_magic(&b[i..])) {
+                    Some(n) => n,
+                    None => return None,
+                },
+            };
+            if total < 12 || total > 0x10000 {
+                self.buf.drain(..1);
+                continue;
+            }
+            if self.buf.len() < total {
+                return None;
+            }
+            return Some(self.buf.drain(..total).collect());
+        }
+    }
+}
+
+/// Collects one frame's 0xAB66 packets.
+#[derive(Default)]
+pub struct ImageAssembler {
+    data: Vec<u8>,
+    filled: Vec<bool>,
+    pub packets: usize,
+}
+
+impl ImageAssembler {
+    /// Adds a 0xAB66 packet: u16 packet number at byte 4, data length at 10.
+    pub fn add(&mut self, packet: &[u8]) -> bool {
+        if kind(packet) != Some(Kind::Image) || packet.len() < IMAGE_HEADER {
+            return false;
+        }
+        let index = u16::from_le_bytes([packet[4], packet[5]]) as usize;
+        let len = u16::from_le_bytes([packet[10], packet[11]]) as usize;
+        let Some(data) = packet.get(IMAGE_HEADER..IMAGE_HEADER + len) else { return false };
+        let at = index * IMAGE_SLOT;
+        if at + len > 4 * 1300 * 1800 {
+            return false;
+        }
+        if self.data.len() < at + len {
+            self.data.resize(at + len, 0);
+        }
+        self.data[at..at + len].copy_from_slice(data);
+        if self.filled.len() <= index {
+            self.filled.resize(index + 1, false);
+        }
+        self.filled[index] = true;
+        self.packets += 1;
+        true
+    }
+
+    /// Packet numbers below the highest one received that are still missing.
+    pub fn missing(&self) -> Vec<usize> {
+        self.filled.iter().enumerate().filter(|(_, &f)| !f).map(|(i, _)| i).collect()
+    }
+
+    /// The frame when its size is one of the known models (16-bit LE pixels,
+    /// either orientation): (width, height, pixels).
+    pub fn finish(&self) -> Option<(usize, usize, Vec<u16>)> {
+        let n = self.data.len() / 2;
+        let m = crate::sensor::MODELS.iter().find(|m| m.width * m.height == n)?;
+        let px = self.data.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+        Some((m.width, m.height, px))
+    }
+}
+
+/// What the acquisition worker reports.
+#[derive(Debug, PartialEq)]
+pub enum Report {
+    Connected,
+    /// Configuration read back (None when the sensor did not send it, in
+    /// which case nothing was written).
+    Configured(Option<ConfigBlock>),
+    Ready,
+    Reading,
+    Frame { width: usize, height: usize, pixels: Vec<u16> },
+    Failed(String),
+}
+
+/// One FinnoRay session over a byte pipe: handshake, read-modify-write of
+/// the AED fields, then single exposures until `stop` is set. The order
+/// follows CFinnoRay::AcqImageEx (connect, set the three attributes, write
+/// user RAM, prepare single); it has not been run against a sensor.
+pub struct Session<P: crate::ftdi::Pipe> {
+    pub pipe: P,
+    seq: Sequence,
+    framer: Framer,
+}
+
+impl<P: crate::ftdi::Pipe> Session<P> {
+    pub fn new(pipe: P) -> Self {
+        Session { pipe, seq: Sequence::default(), framer: Framer::default() }
+    }
+
+    fn send(&mut self, code: u8, params: &[u8]) -> Result<(), String> {
+        let p = command(self.seq.next(), code, params);
+        self.pipe.send(&p)
+    }
+
+    /// Waits for a packet `want` accepts; other packets are dropped.
+    fn wait(&mut self, ms: u64, mut want: impl FnMut(&[u8]) -> bool) -> Result<Option<Vec<u8>>, String> {
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        loop {
+            while let Some(p) = self.framer.next() {
+                if want(&p) {
+                    return Ok(Some(p));
+                }
+            }
+            if std::time::Instant::now() >= end {
+                return Ok(None);
+            }
+            if self.pipe.receive(&mut self.framer.buf)? == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    }
+
+    fn ack(&mut self, code: u8, ms: u64) -> Result<bool, String> {
+        Ok(self.wait(ms, |p| acknowledged(p).is_some_and(|(c, _)| c == code))?.is_some())
+    }
+
+    pub fn connect(&mut self) -> Result<(), String> {
+        self.send(cmd::CONNECT, &[])?;
+        if !self.ack(cmd::CONNECT, 1000)? {
+            return Err("The sensor did not answer.".into());
+        }
+        Ok(())
+    }
+
+    /// Reads the config block (0x75), patches the AED fields and writes it
+    /// back (0x74). Without a readback nothing is written: the block holds
+    /// network and calibration fields that must not be zeroed.
+    pub fn configure(&mut self, aed: &Aed) -> Result<Option<ConfigBlock>, String> {
+        self.send(cmd::READ_CONFIG, &[])?;
+        let reply = self.wait(1000, |p| matches!(kind(p), Some(Kind::Data | Kind::Command)) && p.len() >= 10 + ConfigBlock::LEN && p[9] == cmd::READ_CONFIG)?;
+        let Some(block) = reply.and_then(|p| ConfigBlock::from_bytes(&p[10..])) else { return Ok(None) };
+        let mut block = block;
+        block.apply(aed);
+        let p = block.write_ram(self.seq.next());
+        self.pipe.send(&p)?;
+        if !self.ack(cmd::WRITE_RAM, 1000)? {
+            return Err("The sensor did not accept the exposure settings.".into());
+        }
+        Ok(Some(block))
+    }
+
+    /// Arms one exposure and collects its image. Returns None when `stop`
+    /// was set or nothing arrived in `wait_ms`.
+    pub fn expose(&mut self, wait_ms: u64, stop: &dyn Fn() -> bool, mut report: impl FnMut(Report)) -> Result<Option<(usize, usize, Vec<u16>)>, String> {
+        self.send(cmd::PREPARE_SINGLE, &[])?;
+        report(Report::Ready);
+        let mut image = ImageAssembler::default();
+        let start = std::time::Instant::now();
+        let mut last = None::<std::time::Instant>;
+        loop {
+            if stop() {
+                return Ok(None);
+            }
+            while let Some(p) = self.framer.next() {
+                if image.add(&p) {
+                    if last.is_none() {
+                        report(Report::Reading);
+                    }
+                    last = Some(std::time::Instant::now());
+                }
+            }
+            if let Some(t) = last {
+                // The frame is complete once it matches a model size and the
+                // stream has been quiet briefly.
+                if t.elapsed() >= std::time::Duration::from_millis(300) {
+                    return match image.finish() {
+                        Some(f) if image.missing().is_empty() => Ok(Some(f)),
+                        _ => Err(format!("Incomplete image ({} packets).", image.packets)),
+                    };
+                }
+            } else if start.elapsed() >= std::time::Duration::from_millis(wait_ms) {
+                return Ok(None);
+            }
+            if self.pipe.receive(&mut self.framer.buf)? == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    }
+}
+
+/// The worker loop the Acquisition screen runs on its own thread.
+pub fn run<P: crate::ftdi::Pipe>(pipe: P, aed: Aed, stop: &dyn Fn() -> bool, report: &mut dyn FnMut(Report)) {
+    let mut s = Session::new(pipe);
+    if let Err(e) = s.connect() {
+        return report(Report::Failed(e));
+    }
+    report(Report::Connected);
+    match s.configure(&aed) {
+        Ok(b) => report(Report::Configured(b)),
+        Err(e) => return report(Report::Failed(e)),
+    }
+    while !stop() {
+        match s.expose(30_000, stop, &mut *report) {
+            Ok(Some((width, height, pixels))) => report(Report::Frame { width, height, pixels }),
+            Ok(None) => {}
+            Err(e) => report(Report::Failed(e)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    /// A detector stand-in: answers commands and sends a 1000×1500 frame
+    /// after PREPARE_SINGLE.
+    struct Fake {
+        out: Vec<u8>,
+        config: [u8; 512],
+        written: Option<Vec<u8>>,
+    }
+
+    fn ack(code: u8) -> Vec<u8> {
+        // No extended header: echo at byte 10, status at 9.
+        let mut p = command(0, 0x00, &[code]);
+        p[9] = 0;
+        p
+    }
+
+    impl crate::ftdi::Pipe for Fake {
+        fn send(&mut self, d: &[u8]) -> Result<(), String> {
+            match d[9] {
+                cmd::CONNECT => self.out.extend(ack(cmd::CONNECT)),
+                cmd::READ_CONFIG => self.out.extend(command(0, cmd::READ_CONFIG, &self.config)),
+                cmd::WRITE_RAM => {
+                    self.written = Some(d[10..10 + 512].to_vec());
+                    self.out.extend(ack(cmd::WRITE_RAM));
+                }
+                cmd::PREPARE_SINGLE => {
+                    self.out.extend(ack(cmd::PREPARE_SINGLE));
+                    let bytes: Vec<u8> = (0..1000 * 1500u32).flat_map(|i| ((i % 4096) as u16).to_le_bytes()).collect();
+                    // Sent out of order with junk in between.
+                    let chunks: Vec<_> = bytes.chunks(IMAGE_SLOT).enumerate().collect();
+                    for (i, c) in chunks.iter().rev() {
+                        let mut p = vec![0x66, 0xAB, 0, 0];
+                        p.extend((*i as u16).to_le_bytes());
+                        p.extend([0, 0, 0, 0]);
+                        p.extend((c.len() as u16).to_le_bytes());
+                        p.extend([0, 0, 0, 0]);
+                        p.extend_from_slice(c);
+                        p.push(0xEE);
+                        self.out.extend(p);
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        fn receive(&mut self, out: &mut Vec<u8>) -> Result<usize, String> {
+            let n = self.out.len().min(4096);
+            out.extend(self.out.drain(..n));
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn session_configures_and_assembles_a_frame() {
+        let mut config = [0u8; 512];
+        config[0x100] = 0x5A;
+        let mut s = Session::new(Fake { out: Vec::new(), config, written: None });
+        s.connect().unwrap();
+        let aed = Aed::from_preferences(true, 2, 4);
+        let block = s.configure(&aed).unwrap().unwrap();
+        assert_eq!(block.trigger_mode(), Some(TriggerMode::AedDc));
+        let written = s.pipe.written.clone().unwrap();
+        assert_eq!(written[0x100], 0x5A, "unknown fields kept");
+        assert_eq!(u16::from_le_bytes([written[0x30], written[0x31]]), 500);
+        let mut seen = Vec::new();
+        let (w, h, px) = s.expose(1000, &|| false, |r| seen.push(r)).unwrap().unwrap();
+        assert_eq!((w, h), (1000, 1500));
+        assert_eq!(px[4097], 1);
+        assert_eq!(seen, [Report::Ready, Report::Reading]);
+    }
+
+    #[test]
+    fn framer_resyncs_over_junk() {
+        let mut f = Framer::default();
+        f.buf.extend([1, 2, 3]);
+        f.buf.extend(command(5, cmd::RESET, &[9]));
+        let p = f.next().unwrap();
+        assert_eq!(p[9], cmd::RESET);
+        assert!(f.next().is_none());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
