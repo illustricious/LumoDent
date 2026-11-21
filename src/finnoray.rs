@@ -547,6 +547,28 @@ mod session_tests {
         assert_eq!(seen, [Report::Ready, Report::Reading]);
     }
 
+    /// Garbage from a device that is not a sensor never panics, and the
+    /// buffer cannot grow past one maximal packet.
+    #[test]
+    fn framer_and_assembler_survive_noise() {
+        let mut f = Framer::default();
+        let mut image = ImageAssembler::default();
+        let mut x = 0x1234_5678u32;
+        for _ in 0..200_000 {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            // Bias towards magic bytes so headers with wild lengths appear.
+            f.buf.push(match x % 7 { 0 => 0xAB, 1 => 0x66, 2 => 0x55, _ => (x >> 8) as u8 });
+            while let Some(p) = f.next() {
+                image.add(&p);
+                let _ = acknowledged(&p);
+            }
+            assert!(f.buf.len() <= 0x10000 + 1);
+        }
+        let _ = image.finish();
+    }
+
     #[test]
     fn framer_resyncs_over_junk() {
         let mut f = Framer::default();

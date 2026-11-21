@@ -245,6 +245,11 @@ impl<T: Transport> Sensor<T> {
         }
         let u = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
         self.info = DeviceInfo { product: u(0), width: u(2), height: u(4), serial: cstr(b.get(6..15).unwrap_or(&[])) };
+        // A garbled reply must not size a multi-gigabyte frame buffer: real
+        // sensors are a few hundred to ~2600 pixels a side.
+        if !(16..=4096).contains(&self.info.width) || !(16..=4096).contains(&self.info.height) {
+            return None;
+        }
         if self.info.product == 0x44 && !self.info.serial.starts_with(|c: char| ('1'..='9').contains(&c)) {
             return None;
         }
@@ -617,6 +622,15 @@ mod tests {
         let mut usb = gen1(120, 80);
         usb.replies.insert(req::DEVICE_INFO, info(0x44, 120, 80, "X1234567"));
         assert!(Sensor::open(usb).is_none());
+    }
+
+    #[test]
+    fn rejects_garbled_frame_size() {
+        for (w, h) in [(0, 80), (120, 0), (65535, 65535)] {
+            let mut usb = gen1(120, 80);
+            usb.replies.insert(req::DEVICE_INFO, info(0x44, w, h, "12090806"));
+            assert!(Sensor::open(usb).is_none(), "{w}x{h}");
+        }
     }
 
     #[test]

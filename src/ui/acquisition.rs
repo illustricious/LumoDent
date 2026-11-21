@@ -111,6 +111,11 @@ pub struct Capture {
     /// Whether the running session is an FTDI sensor (it is reconnected
     /// when the generator settings change, to send them).
     pub ftdi_session: bool,
+    /// Devices that failed to connect this session (path or FTDI serial).
+    /// Any FTDI chip has VID 0403 (USB-serial adapters too), so one that does
+    /// not answer like a sensor is not opened again every two seconds.
+    pub rejected: Vec<String>,
+    current: Option<String>,
     pub details: Option<Details>,
     rx: Option<Receiver<Event>>,
     stop: Option<Arc<AtomicBool>>,
@@ -149,9 +154,13 @@ impl Capture {
                     self.devices = devices;
                     self.ftdi = ftdi;
                     self.searched = true;
-                    if let Some(found) = self.devices.first().cloned() {
+                    // A device that was unplugged gets another try when it returns.
+                    let present: Vec<&String> = self.devices.iter().map(|f| &f.path).chain(self.ftdi.iter().map(|d| &d.serial)).collect();
+                    self.rejected.retain(|id| present.contains(&id));
+                    let rejected = self.rejected.clone();
+                    if let Some(found) = self.devices.iter().find(|f| !rejected.contains(&f.path)).cloned() {
                         self.start(Source::Usb(found));
-                    } else if let Some(d) = self.ftdi.first().cloned() {
+                    } else if let Some(d) = self.ftdi.iter().find(|d| !rejected.contains(&d.serial)).cloned() {
                         self.start(Source::Ftdi(d));
                     }
                 }
@@ -167,6 +176,11 @@ impl Capture {
         self.disconnect();
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
+        self.current = match &source {
+            Source::Simulator => None,
+            Source::Usb(f) => Some(f.path.clone()),
+            Source::Ftdi(d) => Some(d.serial.clone()),
+        };
         if let Source::Ftdi(device) = &source {
             let port = match lumodent::ftdi::Port::open(&device.serial) {
                 Ok(p) => p,
@@ -281,6 +295,13 @@ impl App {
                 }
                 Event::Status(s) => self.capture.status = t(s).into(),
                 Event::Failed(e) => {
+                    // Failing before it identified itself: not a sensor (or not
+                    // one we speak to); skip it until it is unplugged.
+                    if self.capture.connected.is_none() {
+                        if let Some(id) = self.capture.current.take() {
+                            self.capture.rejected.push(id);
+                        }
+                    }
                     self.capture.disconnect();
                     self.capture.status = e;
                 }
